@@ -5,6 +5,7 @@ import {
   addPlayer,
   canResolveShowdown,
   createInitialGameState,
+  removePlayer,
   resolveShowdown,
   restartCampaign,
   setPlayerConfidence,
@@ -84,6 +85,22 @@ test('resolveShowdown assigns actual ranks and marks a failed read when slots ar
   assert.equal(bob?.actualRank, 1);
   assert.equal(alice?.handLabel, 'Two pair');
   assert.equal(bob?.handLabel, 'One pair');
+});
+
+test('removePlayer resets an in-progress game to lobby when too few players remain', () => {
+  let state = startGame(createLobbyState(), () => 0.4);
+  state = removePlayer(state, 'bob');
+
+  assert.equal(state.phase, 'lobby');
+  assert.equal(state.round, 0);
+  assert.equal(state.street, 'idle');
+  assert.equal(state.successfulHands, 0);
+  assert.equal(state.failedHands, 0);
+  assert.equal(state.players.length, 1);
+  assert.equal(state.players[0]?.id, 'alice');
+  assert.equal(state.players[0]?.ready, false);
+  assert.equal(state.players[0]?.holeCardCount, 0);
+  assert.equal(state.hostId, 'alice');
 });
 
 test('startNextHand rotates the dealer, clears prior showdown markers, and keeps the campaign running', () => {
