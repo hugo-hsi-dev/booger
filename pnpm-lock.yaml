@@ -78,10 +78,6 @@ importers:
         version: 8.0.8(@types/node@25.5.2)(esbuild@0.27.7)(tsx@4.21.0)
 
   packages/game:
-    dependencies:
-      '@booger/shared':
-        specifier: workspace:*
-        version: link:../shared
     devDependencies:
       '@types/node':
         specifier: ^25.5.2
@@ -95,6 +91,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@booger/game':
+        specifier: workspace:*
+        version: link:../game
       '@colyseus/schema':
         specifier: ^4.0.19
         version: 4.0.19(typescript@5.9.3)
