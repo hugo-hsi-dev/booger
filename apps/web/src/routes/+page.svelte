@@ -11,6 +11,7 @@
     ROOM_NAME,
     TABLE_ACTION_MESSAGE,
     toRoomView,
+    type CampaignStatus,
     type CardCode,
     type CardSuit,
     type GameOutcome,
@@ -27,7 +28,13 @@
     ready?: boolean;
   };
   type TableActionMessage = {
-    type: 'advance-street' | 'resolve-showdown' | 'set-confidence' | 'sync-private-state';
+    type:
+      | 'advance-street'
+      | 'resolve-showdown'
+      | 'restart-run'
+      | 'set-confidence'
+      | 'next-hand'
+      | 'sync-private-state';
     confidenceRank?: number | null;
   };
   type SavedRoomSession = {
@@ -93,6 +100,17 @@
         roomView.players.every((player) => player.confidenceRank !== null)
     )
   );
+  let canDealNextHand = $derived(
+    Boolean(
+      roomView &&
+        roomView.phase === 'finished' &&
+        roomView.campaignStatus === 'ongoing' &&
+        isHost &&
+        roomView.players.length >= 2 &&
+        roomView.players.every((player) => player.connected)
+    )
+  );
+  let canRestartRun = $derived(Boolean(roomView && roomView.phase === 'finished' && isHost));
   let advanceStreetLabel = $derived(roomView ? getAdvanceStreetLabel(roomView.street) : 'Advance street');
   let connectionLabel = $derived(
     connectionState === 'connecting'
@@ -118,9 +136,13 @@
             : me
               ? 'Read your cards, claim a confidence slot, and adjust as the board develops.'
               : 'Spectating the live table.'
-          : roomView.outcome === 'success'
-            ? 'The team matched confidence to the actual hand order.'
-            : 'Compare the claimed order to the revealed actual rankings.'
+          : roomView.campaignStatus === 'won'
+            ? 'The crew completed the run. Restart to play another series.'
+            : roomView.campaignStatus === 'lost'
+              ? 'The alarm track filled up. Restart to begin a fresh run.'
+              : isHost
+                ? 'The hand is scored. Deal the next hand when everyone is ready.'
+                : 'Waiting for the host to deal the next hand.'
   );
 
   function ensureClient() {
@@ -229,7 +251,12 @@
       setSnapshot(state);
       persistSession(nextRoom);
 
-      if (state.phase !== 'lobby' && (!privateState?.holeCards.length || previousPhase !== state.phase)) {
+      if (state.phase === 'lobby') {
+        privateState = null;
+        return;
+      }
+
+      if (!privateState?.holeCards.length || previousPhase !== state.phase) {
         requestPrivateState(nextRoom);
       }
     });
@@ -337,6 +364,14 @@
     sendTableAction({ type: 'resolve-showdown' });
   }
 
+  function dealNextHand() {
+    sendTableAction({ type: 'next-hand' });
+  }
+
+  function restartRun() {
+    sendTableAction({ type: 'restart-run' });
+  }
+
   function claimConfidenceRank(confidenceRank: number) {
     if (roomView?.phase !== 'playing') return;
     sendTableAction({ type: 'set-confidence', confidenceRank });
@@ -377,6 +412,17 @@
         return 'Missed';
       default:
         return 'Pending';
+    }
+  }
+
+  function formatCampaignStatusLabel(status: CampaignStatus) {
+    switch (status) {
+      case 'won':
+        return 'Run won';
+      case 'lost':
+        return 'Run lost';
+      default:
+        return 'Run active';
     }
   }
 
@@ -555,7 +601,7 @@
           <button type="button" class="ghost" onclick={startGame} disabled={!canStart}>
             Start game
           </button>
-        {:else if hasHandView}
+        {:else if roomView?.phase === 'playing'}
           <button type="button" class="ghost" onclick={() => requestPrivateState()} disabled={!roomView}>
             Sync my cards
           </button>
@@ -567,6 +613,19 @@
           {:else}
             <button type="button" class="ghost" onclick={advanceStreet} disabled={!canAdvanceStreet}>
               {advanceStreetLabel}
+            </button>
+          {/if}
+        {:else if roomView?.phase === 'finished'}
+          <button type="button" class="ghost" onclick={() => requestPrivateState()} disabled={!roomView}>
+            Sync my cards
+          </button>
+          {#if roomView.campaignStatus === 'ongoing'}
+            <button type="button" class="ghost" onclick={dealNextHand} disabled={!canDealNextHand}>
+              Deal next hand
+            </button>
+          {:else}
+            <button type="button" class="ghost" onclick={restartRun} disabled={!canRestartRun}>
+              Restart run
             </button>
           {/if}
         {/if}
@@ -594,8 +653,8 @@
             <strong>{roomView.round}</strong>
           </div>
           <div>
-            <span class="meta-label">Outcome</span>
-            <strong>{formatOutcomeLabel(roomView.outcome)}</strong>
+            <span class="meta-label">Run state</span>
+            <strong>{formatCampaignStatusLabel(roomView.campaignStatus)}</strong>
           </div>
           <div>
             <span class="meta-label">Finished</span>
@@ -635,12 +694,12 @@
 
           {#if hasHandView}
             <div>
-              <span class="meta-label">Street</span>
-              <strong>{formatStreetLabel(roomView.street)}</strong>
+              <span class="meta-label">Progress</span>
+              <strong>{roomView.successfulHands}/{roomView.targetSuccesses}</strong>
             </div>
             <div>
-              <span class="meta-label">Outcome</span>
-              <strong>{formatOutcomeLabel(roomView.outcome)}</strong>
+              <span class="meta-label">Alarms</span>
+              <strong>{roomView.failedHands}/{roomView.maxFailures}</strong>
             </div>
           {:else}
             <div>
@@ -659,13 +718,58 @@
           <p>{tableSubline}</p>
         </div>
 
+        {#if hasHandView}
+          <section class="campaign-track panel-surface">
+            <div class="surface-header">
+              <div>
+                <span class="eyebrow">Crew progress</span>
+                <h3>{formatCampaignStatusLabel(roomView.campaignStatus)}</h3>
+              </div>
+              <div class="street-meta">
+                <span>{roomView.successfulHands}/{roomView.targetSuccesses} successful hands</span>
+                <span>{roomView.failedHands}/{roomView.maxFailures} alarms</span>
+              </div>
+            </div>
+
+            <div class="campaign-grid">
+              <div class="campaign-lane">
+                <span class="meta-label">Success track</span>
+                <div class="token-row">
+                  {#each Array.from({ length: roomView.targetSuccesses }, (_, index) => index) as index (index)}
+                    <span class={`track-token success ${index < roomView.successfulHands ? 'filled' : ''}`}>{index + 1}</span>
+                  {/each}
+                </div>
+              </div>
+
+              <div class="campaign-lane">
+                <span class="meta-label">Alarm track</span>
+                <div class="token-row">
+                  {#each Array.from({ length: roomView.maxFailures }, (_, index) => index) as index (index)}
+                    <span class={`track-token failure ${index < roomView.failedHands ? 'filled' : ''}`}>{index + 1}</span>
+                  {/each}
+                </div>
+              </div>
+            </div>
+          </section>
+        {/if}
+
         {#if roomView.phase === 'finished'}
           <section class={`resolution panel-surface ${roomView.outcome}`}>
             <div>
               <span class="eyebrow">Round result</span>
               <h3>{roomView.outcome === 'success' ? 'The order matched' : 'The order missed'}</h3>
             </div>
-            <p>{roomView.outcome === 'success' ? 'Confidence and actual strength aligned.' : 'Use the revealed ranks to compare your read against reality.'}</p>
+            <p>
+              {#if roomView.campaignStatus === 'ongoing'}
+                {roomView.outcome === 'success'
+                  ? 'Confidence and actual strength aligned. The host can now deal the next hand.'
+                  : 'Use the revealed ranks to compare your read against reality, then deal the next hand.'}
+              {:else if roomView.campaignStatus === 'won'}
+                The crew completed the run. Restart the run to play another series.
+              {:else}
+                The run ended on the alarm track. Restart to begin fresh.
+              {/if}
+            </p>
           </section>
         {/if}
 
@@ -1183,6 +1287,7 @@
   }
 
   .resolution,
+  .campaign-track,
   .board,
   .private-hand,
   .confidence-board {
@@ -1197,6 +1302,48 @@
   .resolution.failure {
     border-color: rgba(224, 140, 140, 0.22);
     background: linear-gradient(180deg, rgba(95, 43, 43, 0.32), rgba(35, 16, 16, 0.32));
+  }
+
+  .campaign-grid,
+  .token-row {
+    display: grid;
+    gap: 0.85rem;
+  }
+
+  .campaign-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .campaign-lane {
+    display: grid;
+    gap: 0.65rem;
+  }
+
+  .token-row {
+    grid-template-columns: repeat(auto-fit, minmax(2.5rem, 1fr));
+  }
+
+  .track-token {
+    min-height: 2.5rem;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    border: 1px solid rgba(243, 226, 186, 0.12);
+    color: rgba(244, 238, 224, 0.7);
+    background: rgba(244, 238, 224, 0.04);
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+
+  .track-token.success.filled {
+    color: #06100b;
+    background: #8de0a0;
+  }
+
+  .track-token.failure.filled {
+    color: #06100b;
+    background: #f0a3a3;
   }
 
   .community-cards,
@@ -1502,7 +1649,8 @@
 
   @media (max-width: 640px) {
     .play-brief,
-    .stats {
+    .stats,
+    .campaign-grid {
       grid-template-columns: 1fr 1fr;
     }
 
@@ -1512,7 +1660,8 @@
       grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr));
     }
 
-    .confidence-grid {
+    .confidence-grid,
+    .campaign-grid {
       grid-template-columns: 1fr;
     }
 

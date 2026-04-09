@@ -1,5 +1,6 @@
 export type GamePhase = 'lobby' | 'playing' | 'finished';
 export type GameOutcome = 'pending' | 'success' | 'failure';
+export type CampaignStatus = 'ongoing' | 'won' | 'lost';
 export type TableStreet = 'idle' | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown';
 export type CardSuit = 'S' | 'H' | 'D' | 'C';
 export type CardRank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | 'T' | 'J' | 'Q' | 'K' | 'A';
@@ -25,6 +26,11 @@ export interface GameState {
   maxPlayers: number;
   status: string;
   outcome: GameOutcome;
+  campaignStatus: CampaignStatus;
+  successfulHands: number;
+  failedHands: number;
+  targetSuccesses: number;
+  maxFailures: number;
   players: GamePlayer[];
   createdAt: number;
   startedAt: number | null;
@@ -45,6 +51,8 @@ interface HandScore {
 }
 
 const DEFAULT_MAX_PLAYERS = 6;
+const DEFAULT_TARGET_SUCCESSES = 3;
+const DEFAULT_MAX_FAILURES = 3;
 const CARD_SUITS = ['S', 'H', 'D', 'C'] as const;
 const CARD_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'] as const;
 const RANK_VALUE: Record<CardRank, number> = {
@@ -92,6 +100,34 @@ function describePlayingStatus(street: TableStreet) {
     default:
       return 'Waiting for players';
   }
+}
+
+function describeFinishedStatus(
+  outcome: GameOutcome,
+  campaignStatus: CampaignStatus,
+  successfulHands: number,
+  targetSuccesses: number,
+  failedHands: number,
+  maxFailures: number,
+  tieSuffix = ''
+) {
+  if (campaignStatus === 'won') {
+    return `Hand matched. The crew completed the run at ${successfulHands}/${targetSuccesses} successes.${tieSuffix}`;
+  }
+
+  if (campaignStatus === 'lost') {
+    return `Hand missed. The alarm track hit ${failedHands}/${maxFailures} failures.${tieSuffix}`;
+  }
+
+  if (outcome === 'success') {
+    return `Hand matched. Crew progress ${successfulHands}/${targetSuccesses}.${tieSuffix}`;
+  }
+
+  if (outcome === 'failure') {
+    return `Hand missed. Alarm track ${failedHands}/${maxFailures}.${tieSuffix}`;
+  }
+
+  return 'Waiting for players';
 }
 
 function createPlayer(base: Pick<GamePlayer, 'id' | 'name' | 'connected'>, seat: number): GamePlayer {
@@ -340,6 +376,51 @@ function evaluateBestHand(cards: CardCode[]) {
   return best;
 }
 
+function prepareHand(state: GameState, dealerSeat: number | null, rng: GameRng) {
+  if (state.players.length < 2) {
+    throw new Error('At least two players are required');
+  }
+
+  if (!state.players.every((player) => player.connected)) {
+    throw new Error('All players must be connected to continue');
+  }
+
+  let deck = shuffleDeck(createDeck(), rng);
+  const privateHands: Record<string, CardCode[]> = {};
+
+  for (const player of state.players) {
+    const deal = drawCards(deck, 2);
+    privateHands[player.id] = deal.cards;
+    deck = deal.deck;
+  }
+
+  const players = state.players.map((player) => ({
+    ...player,
+    ready: false,
+    holeCardCount: privateHands[player.id]?.length ?? 0,
+    confidenceRank: null,
+    actualRank: null,
+    handLabel: null
+  }));
+  const normalizedDealerSeat = dealerSeat ?? players[0]?.seat ?? null;
+
+  return {
+    ...state,
+    phase: 'playing' as const,
+    startedAt: Date.now(),
+    finishedAt: null,
+    status: describePlayingStatus('pre-flop'),
+    outcome: 'pending' as const,
+    players,
+    street: 'pre-flop' as const,
+    dealerSeat: normalizedDealerSeat,
+    activeSeat: normalizedDealerSeat,
+    communityCards: [] as CardCode[],
+    deck,
+    privateHands
+  };
+}
+
 export function createDeck(): CardCode[] {
   const deck: CardCode[] = [];
 
@@ -371,6 +452,11 @@ export function createInitialGameState(roomId = '', maxPlayers = DEFAULT_MAX_PLA
     maxPlayers,
     status: 'Waiting for players',
     outcome: 'pending',
+    campaignStatus: 'ongoing',
+    successfulHands: 0,
+    failedHands: 0,
+    targetSuccesses: DEFAULT_TARGET_SUCCESSES,
+    maxFailures: DEFAULT_MAX_FAILURES,
     players: [],
     createdAt: Date.now(),
     startedAt: null,
@@ -504,41 +590,16 @@ export function startGame(state: GameState, rng: GameRng = Math.random): GameSta
     throw new Error('Game cannot start yet');
   }
 
-  let deck = shuffleDeck(createDeck(), rng);
-  const privateHands: Record<string, CardCode[]> = {};
-
-  for (const player of state.players) {
-    const deal = drawCards(deck, 2);
-    privateHands[player.id] = deal.cards;
-    deck = deal.deck;
-  }
-
-  const players = state.players.map((player) => ({
-    ...player,
-    ready: false,
-    holeCardCount: privateHands[player.id]?.length ?? 0,
-    confidenceRank: null,
-    actualRank: null,
-    handLabel: null
-  }));
-  const dealerSeat = players[0]?.seat ?? null;
-
-  return {
-    ...state,
-    phase: 'playing',
-    startedAt: Date.now(),
-    finishedAt: null,
-    status: describePlayingStatus('pre-flop'),
-    outcome: 'pending',
-    players,
-    round: state.round + 1,
-    street: 'pre-flop',
-    dealerSeat,
-    activeSeat: dealerSeat,
-    communityCards: [],
-    deck,
-    privateHands
-  };
+  return prepareHand(
+    {
+      ...state,
+      round: 1,
+      outcome: 'pending',
+      campaignStatus: 'ongoing'
+    },
+    state.players[0]?.seat ?? null,
+    rng
+  );
 }
 
 export function advanceStreet(state: GameState): GameState {
@@ -623,19 +684,102 @@ export function resolveShowdown(state: GameState): GameState {
     })
   );
 
-  const success = players.every((player) => player.confidenceRank === player.actualRank);
-  const tieSuffix = hadTie ? ' Ties are broken by seat order in this MVP.' : '';
+  const outcome = players.every((player) => player.confidenceRank === player.actualRank) ? 'success' : 'failure';
+  const successfulHands = state.successfulHands + (outcome === 'success' ? 1 : 0);
+  const failedHands = state.failedHands + (outcome === 'failure' ? 1 : 0);
+  const campaignStatus: CampaignStatus =
+    successfulHands >= state.targetSuccesses
+      ? 'won'
+      : failedHands >= state.maxFailures
+        ? 'lost'
+        : 'ongoing';
+  const tieSuffix = hadTie ? ' Ties use seat order in this MVP.' : '';
 
   return {
     ...state,
     phase: 'finished',
     finishedAt: Date.now(),
     activeSeat: null,
-    outcome: success ? 'success' : 'failure',
+    outcome,
+    campaignStatus,
+    successfulHands,
+    failedHands,
     players,
-    status: success
-      ? `Confidence order matched the actual hand strength.${tieSuffix}`
-      : `Confidence order missed the actual hand strength.${tieSuffix}`
+    status: describeFinishedStatus(
+      outcome,
+      campaignStatus,
+      successfulHands,
+      state.targetSuccesses,
+      failedHands,
+      state.maxFailures,
+      tieSuffix
+    )
+  };
+}
+
+export function canStartNextHand(state: GameState) {
+  return (
+    state.phase === 'finished' &&
+    state.campaignStatus === 'ongoing' &&
+    state.players.length >= 2 &&
+    state.players.every((player) => player.connected)
+  );
+}
+
+export function startNextHand(state: GameState, rng: GameRng = Math.random): GameState {
+  if (!canStartNextHand(state)) {
+    throw new Error('Next hand cannot start yet');
+  }
+
+  const dealerSeat =
+    state.dealerSeat === null
+      ? state.players[0]?.seat ?? null
+      : (state.dealerSeat + 1) % state.players.length;
+
+  return prepareHand(
+    {
+      ...state,
+      round: state.round + 1,
+      outcome: 'pending',
+      finishedAt: null
+    },
+    dealerSeat,
+    rng
+  );
+}
+
+export function restartCampaign(state: GameState): GameState {
+  if (state.players.length < 2) {
+    throw new Error('At least two players are required to restart');
+  }
+
+  const players = state.players.map((player) => ({
+    ...player,
+    ready: false,
+    holeCardCount: 0,
+    confidenceRank: null,
+    actualRank: null,
+    handLabel: null
+  }));
+
+  return {
+    ...state,
+    phase: 'lobby',
+    status: describeLobbyStatus({ players }),
+    outcome: 'pending',
+    campaignStatus: 'ongoing',
+    successfulHands: 0,
+    failedHands: 0,
+    players,
+    startedAt: null,
+    finishedAt: null,
+    round: 0,
+    street: 'idle',
+    dealerSeat: null,
+    activeSeat: null,
+    communityCards: [],
+    deck: [],
+    privateHands: {}
   };
 }
 
@@ -651,6 +795,7 @@ export function finishGame(state: GameState, winnerId: string | null = null): Ga
     street: 'showdown',
     activeSeat: null,
     outcome: winnerId ? 'success' : state.outcome,
+    campaignStatus: winnerId ? 'won' : state.campaignStatus,
     status: winnerId ? `Winner: ${winnerId}` : 'Game finished'
   };
 }

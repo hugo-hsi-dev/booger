@@ -8,10 +8,12 @@ import {
   getPlayerHand,
   removePlayer,
   resolveShowdown,
+  restartCampaign,
   setPlayerConfidence,
   setPlayerConnected,
   setPlayerReady,
   startGame,
+  startNextHand,
   type CardCode,
   type GameState,
   type TableStreet
@@ -28,7 +30,13 @@ interface LobbyActionMessage {
 }
 
 interface TableActionMessage {
-  type: 'advance-street' | 'resolve-showdown' | 'set-confidence' | 'sync-private-state';
+  type:
+    | 'advance-street'
+    | 'resolve-showdown'
+    | 'restart-run'
+    | 'set-confidence'
+    | 'next-hand'
+    | 'sync-private-state';
   confidenceRank?: number | null;
 }
 
@@ -104,6 +112,19 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
         }
 
         this.gameState = resolveShowdown(this.gameState);
+        this.syncState();
+        return;
+      }
+
+      if (message.type === 'next-hand') {
+        this.gameState = startNextHand(this.gameState);
+        this.syncState();
+        this.sendPrivateStateToAll();
+        return;
+      }
+
+      if (message.type === 'restart-run') {
+        this.gameState = restartCampaign(this.gameState);
         this.syncState();
       }
     });

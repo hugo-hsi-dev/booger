@@ -1,6 +1,14 @@
 import { ArraySchema, Schema, type } from '@colyseus/schema';
 
-import type { CardCode, GameOutcome, GamePhase, GamePlayer, GameState, TableStreet } from '@booger/game';
+import type {
+  CampaignStatus,
+  CardCode,
+  GameOutcome,
+  GamePhase,
+  GamePlayer,
+  GameState,
+  TableStreet
+} from '@booger/game';
 
 export class PlayerSchema extends Schema {
   @type('string') id = '';
@@ -21,6 +29,11 @@ export class GameStateSchema extends Schema {
   @type('number') maxPlayers = 6;
   @type('string') status = 'Waiting for players';
   @type('string') outcome: GameOutcome = 'pending';
+  @type('string') campaignStatus: CampaignStatus = 'ongoing';
+  @type('number') successfulHands = 0;
+  @type('number') failedHands = 0;
+  @type('number') targetSuccesses = 3;
+  @type('number') maxFailures = 3;
   @type([PlayerSchema]) players = new ArraySchema<PlayerSchema>();
   @type('number') createdAt = 0;
   @type('number') startedAt = 0;
@@ -59,6 +72,11 @@ export function syncRoomState(roomState: GameStateSchema, state: GameState) {
   roomState.maxPlayers = state.maxPlayers;
   roomState.status = state.status;
   roomState.outcome = state.outcome;
+  roomState.campaignStatus = state.campaignStatus;
+  roomState.successfulHands = state.successfulHands;
+  roomState.failedHands = state.failedHands;
+  roomState.targetSuccesses = state.targetSuccesses;
+  roomState.maxFailures = state.maxFailures;
   roomState.createdAt = state.createdAt;
   roomState.startedAt = state.startedAt ?? 0;
   roomState.finishedAt = state.finishedAt ?? 0;

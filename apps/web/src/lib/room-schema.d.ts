@@ -17,6 +17,11 @@ export declare class GameStateSchema {
   maxPlayers: number;
   status: string;
   outcome: string;
+  campaignStatus: string;
+  successfulHands: number;
+  failedHands: number;
+  targetSuccesses: number;
+  maxFailures: number;
   players: PlayerSchema[];
   createdAt: number;
   startedAt: number;

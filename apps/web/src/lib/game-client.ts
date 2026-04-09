@@ -3,6 +3,7 @@ import { GameStateSchema } from './room-schema';
 
 export type RoomPhase = 'lobby' | 'playing' | 'finished';
 export type GameOutcome = 'pending' | 'success' | 'failure';
+export type CampaignStatus = 'ongoing' | 'won' | 'lost';
 export type TableStreet = 'idle' | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown';
 export type CardSuit = 'S' | 'H' | 'D' | 'C';
 export type CardRank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | 'T' | 'J' | 'Q' | 'K' | 'A';
@@ -27,6 +28,11 @@ export interface RoomView {
   maxPlayers: number;
   status: string;
   outcome: GameOutcome;
+  campaignStatus: CampaignStatus;
+  successfulHands: number;
+  failedHands: number;
+  targetSuccesses: number;
+  maxFailures: number;
   createdAt: number;
   startedAt: number;
   finishedAt: number;
@@ -107,6 +113,11 @@ export function toRoomView(state: GameStateSnapshot): RoomView {
     maxPlayers: state.maxPlayers,
     status: state.status,
     outcome: state.outcome ?? 'pending',
+    campaignStatus: state.campaignStatus ?? 'ongoing',
+    successfulHands: state.successfulHands ?? 0,
+    failedHands: state.failedHands ?? 0,
+    targetSuccesses: state.targetSuccesses ?? 3,
+    maxFailures: state.maxFailures ?? 3,
     createdAt: state.createdAt,
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
