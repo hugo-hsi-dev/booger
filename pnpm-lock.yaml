@@ -45,6 +45,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@booger/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@colyseus/schema':
         specifier: ^4.0.19
         version: 4.0.19(typescript@5.9.3)
