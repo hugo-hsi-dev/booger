@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "skipLibCheck": true,
+    "noUncheckedIndexedAccess": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@booger/shared": ["packages/shared/src/index.ts"],
+      "@booger/game": ["packages/game/src/index.ts"]
+    }
+  }
+}

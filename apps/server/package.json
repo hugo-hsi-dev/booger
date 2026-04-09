@@ -1,0 +1,22 @@
+{
+  "name": "@booger/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist",
+    "check": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "tsup": "^8.5.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@booger/game": "workspace:*",
+    "@booger/shared": "workspace:*",
+    "@colyseus/ws-transport": "^0.17.11",
+    "colyseus": "^0.17.8"
+  }
+}
