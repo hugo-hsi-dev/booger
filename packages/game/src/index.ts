@@ -149,6 +149,40 @@ function reindexPlayers(players: GamePlayer[]) {
   }));
 }
 
+function resetToLobbyState(state: GameState, players: GamePlayer[]) {
+  const lobbyPlayers = reindexPlayers(
+    players.map((player) => ({
+      ...player,
+      ready: false,
+      holeCardCount: 0,
+      confidenceRank: null,
+      actualRank: null,
+      handLabel: null
+    }))
+  );
+
+  return {
+    ...state,
+    phase: 'lobby' as const,
+    hostId: updateHost(state, lobbyPlayers),
+    status: describeLobbyStatus({ players: lobbyPlayers }),
+    outcome: 'pending' as const,
+    campaignStatus: 'ongoing' as const,
+    successfulHands: 0,
+    failedHands: 0,
+    players: lobbyPlayers,
+    startedAt: null,
+    finishedAt: null,
+    round: 0,
+    street: 'idle' as const,
+    dealerSeat: null,
+    activeSeat: null,
+    communityCards: [],
+    deck: [],
+    privateHands: {}
+  };
+}
+
 function updateHost(state: GameState, players: GamePlayer[]) {
   if (players.length === 0) {
     return null;
@@ -503,6 +537,10 @@ export function addPlayer(
 export function removePlayer(state: GameState, playerId: string): GameState {
   const players = reindexPlayers(state.players.filter((player) => player.id !== playerId));
 
+  if (state.phase !== 'lobby' && players.length < 2) {
+    return resetToLobbyState(state, players);
+  }
+
   return {
     ...state,
     hostId: updateHost(state, players),
@@ -753,34 +791,7 @@ export function restartCampaign(state: GameState): GameState {
     throw new Error('At least two players are required to restart');
   }
 
-  const players = state.players.map((player) => ({
-    ...player,
-    ready: false,
-    holeCardCount: 0,
-    confidenceRank: null,
-    actualRank: null,
-    handLabel: null
-  }));
-
-  return {
-    ...state,
-    phase: 'lobby',
-    status: describeLobbyStatus({ players }),
-    outcome: 'pending',
-    campaignStatus: 'ongoing',
-    successfulHands: 0,
-    failedHands: 0,
-    players,
-    startedAt: null,
-    finishedAt: null,
-    round: 0,
-    street: 'idle',
-    dealerSeat: null,
-    activeSeat: null,
-    communityCards: [],
-    deck: [],
-    privateHands: {}
-  };
+  return resetToLobbyState(state, state.players);
 }
 
 export function getPlayerHand(state: GameState, playerId: string): CardCode[] {
