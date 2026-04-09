@@ -7,12 +7,15 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "scripts": {
+    "dev": "tsup src/index.ts --format esm --dts --clean --out-dir dist --watch",
     "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/**/*.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
