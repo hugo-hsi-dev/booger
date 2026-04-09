@@ -1,5 +1,5 @@
 import { Client, type Room } from './colyseus-client.js';
-import { GameStateSchema } from './room-schema';
+import { GameStateSchema } from '@booger/shared';
 
 export type RoomPhase = 'lobby' | 'playing' | 'finished';
 export type GameOutcome = 'pending' | 'success' | 'failure';
