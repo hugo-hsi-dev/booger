@@ -1,5 +1,15 @@
 export type JoinOptions = Record<string, unknown>;
 
+export type SeatReservation = {
+  name: string;
+  roomId: string;
+  processId: string;
+  sessionId: string;
+  protocol?: string;
+  reconnectionToken?: string;
+  devMode?: boolean;
+};
+
 export type Room<State = any> = {
   roomId: string;
   sessionId: string;
@@ -23,7 +33,9 @@ export type Room<State = any> = {
 };
 
 export declare class Client {
+  http: {
+    post<T = any>(path: string, options?: { headers?: Record<string, string>; body?: string }): Promise<{ data: T }>;
+  };
   constructor(endpoint: string);
-  create<State = any>(roomName: string, options?: JoinOptions): Promise<Room<State>>;
-  joinById<State = any>(roomId: string, options?: JoinOptions): Promise<Room<State>>;
+  consumeSeatReservation<State = any>(response: SeatReservation, rootSchema?: any): Promise<Room<State>>;
 }

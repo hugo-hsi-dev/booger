@@ -47,5 +47,8 @@ export function syncRoomState(roomState: GameStateSchema, state: GameState) {
   roomState.createdAt = state.createdAt;
   roomState.startedAt = state.startedAt ?? 0;
   roomState.finishedAt = state.finishedAt ?? 0;
-  roomState.players.splice(0, roomState.players.length, ...state.players.map(toPlayerSchema));
+  roomState.players.clear();
+  for (const player of state.players) {
+    roomState.players.push(toPlayerSchema(player));
+  }
 }

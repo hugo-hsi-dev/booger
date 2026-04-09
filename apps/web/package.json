@@ -20,6 +20,7 @@
     "vite": "^8.0.8"
   },
   "dependencies": {
+    "@colyseus/schema": "^4.0.19",
     "colyseus.js": "^0.16.22"
   }
 }

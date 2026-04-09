@@ -3,7 +3,9 @@
 
   import {
     createGameClient,
+    createRoom,
     getServerEndpoint,
+    joinRoom,
     ROOM_NAME,
     toRoomView,
     type GameRoomClient,
@@ -81,8 +83,8 @@
       const roomName = playerName.trim() || 'Player';
       const nextRoom =
         mode === 'create'
-          ? await ensureClient().create(ROOM_NAME, { name: roomName })
-          : await ensureClient().joinById(roomCode.trim(), { name: roomName });
+          ? await createRoom(ensureClient(), ROOM_NAME, { name: roomName })
+          : await joinRoom(ensureClient(), roomCode.trim(), { name: roomName });
 
       room = nextRoom;
       mySessionId = nextRoom.sessionId;

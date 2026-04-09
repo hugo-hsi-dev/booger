@@ -1,5 +1,5 @@
 import { Client, type Room } from './colyseus-client.js';
-
+import { GameStateSchema } from './room-schema.js';
 
 export type RoomPhase = 'lobby' | 'playing' | 'finished';
 
@@ -31,6 +31,30 @@ export function createGameClient(endpoint: string) {
   return new Client(endpoint);
 }
 
+export async function createRoom(client: Client, roomName: string, options: JoinOptions) {
+  const response = await client.http.post<SeatReservation>(`matchmake/create/${roomName}`, {
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(options)
+  });
+
+  return client.consumeSeatReservation(normalizeSeatReservation(response.data) as any, GameStateSchema);
+}
+
+export async function joinRoom(client: Client, roomId: string, options: JoinOptions) {
+  const response = await client.http.post<SeatReservation>(`matchmake/joinById/${roomId}`, {
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(options)
+  });
+
+  return client.consumeSeatReservation(normalizeSeatReservation(response.data) as any, GameStateSchema);
+}
+
 export function toRoomView(state: GameStateSnapshot): RoomView {
   return {
     roomId: state.roomId,
@@ -41,7 +65,7 @@ export function toRoomView(state: GameStateSnapshot): RoomView {
     createdAt: state.createdAt,
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
-    players: state.players.map(toPlayerView)
+    players: (state.players ?? []).map(toPlayerView)
   };
 }
 
@@ -60,3 +84,41 @@ export function getServerEndpoint() {
 }
 
 export type GameRoomClient = Room<GameStateSnapshot>;
+
+type JoinOptions = Record<string, unknown>;
+type SeatReservation = {
+  name: string;
+  roomId: string;
+  processId: string;
+  sessionId: string;
+  protocol?: string;
+  reconnectionToken?: string;
+  devMode?: boolean;
+};
+
+type SeatReservationEnvelope = {
+  room: {
+    name: string;
+    roomId: string;
+    processId: string;
+    publicAddress?: string;
+  };
+  sessionId: string;
+  protocol: string;
+  reconnectionToken?: string;
+  devMode?: boolean;
+};
+
+function normalizeSeatReservation(response: SeatReservation): SeatReservationEnvelope {
+  return {
+    room: {
+      name: response.name,
+      roomId: response.roomId,
+      processId: response.processId
+    },
+    sessionId: response.sessionId,
+    protocol: response.protocol ?? 'ws',
+    reconnectionToken: response.reconnectionToken,
+    devMode: response.devMode
+  };
+}
