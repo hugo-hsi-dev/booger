@@ -7,6 +7,9 @@ export class PlayerSchema extends Schema {
   declare ready: boolean;
   declare seat: number;
   declare holeCardCount: number;
+  declare confidenceRank: number;
+  declare actualRank: number;
+  declare handLabel: string;
 }
 
 type('string')(PlayerSchema.prototype, 'id');
@@ -15,6 +18,9 @@ type('boolean')(PlayerSchema.prototype, 'connected');
 type('boolean')(PlayerSchema.prototype, 'ready');
 type('number')(PlayerSchema.prototype, 'seat');
 type('number')(PlayerSchema.prototype, 'holeCardCount');
+type('number')(PlayerSchema.prototype, 'confidenceRank');
+type('number')(PlayerSchema.prototype, 'actualRank');
+type('string')(PlayerSchema.prototype, 'handLabel');
 
 export class GameStateSchema extends Schema {
   declare roomId: string;
@@ -22,6 +28,7 @@ export class GameStateSchema extends Schema {
   declare hostId: string;
   declare maxPlayers: number;
   declare status: string;
+  declare outcome: string;
   declare players: ArraySchema<PlayerSchema>;
   declare createdAt: number;
   declare startedAt: number;
@@ -38,6 +45,7 @@ type('string')(GameStateSchema.prototype, 'phase');
 type('string')(GameStateSchema.prototype, 'hostId');
 type('number')(GameStateSchema.prototype, 'maxPlayers');
 type('string')(GameStateSchema.prototype, 'status');
+type('string')(GameStateSchema.prototype, 'outcome');
 type([PlayerSchema])(GameStateSchema.prototype, 'players');
 type('number')(GameStateSchema.prototype, 'createdAt');
 type('number')(GameStateSchema.prototype, 'startedAt');

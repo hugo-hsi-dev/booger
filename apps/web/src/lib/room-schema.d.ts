@@ -5,6 +5,9 @@ export declare class PlayerSchema {
   ready: boolean;
   seat: number;
   holeCardCount: number;
+  confidenceRank: number;
+  actualRank: number;
+  handLabel: string;
 }
 
 export declare class GameStateSchema {
@@ -13,6 +16,7 @@ export declare class GameStateSchema {
   hostId: string;
   maxPlayers: number;
   status: string;
+  outcome: string;
   players: PlayerSchema[];
   createdAt: number;
   startedAt: number;

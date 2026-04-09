@@ -13,6 +13,7 @@
     toRoomView,
     type CardCode,
     type CardSuit,
+    type GameOutcome,
     type GameRoomClient,
     type PlayerView,
     type PrivateStateMessage,
@@ -26,7 +27,8 @@
     ready?: boolean;
   };
   type TableActionMessage = {
-    type: 'advance-street' | 'sync-private-state';
+    type: 'advance-street' | 'resolve-showdown' | 'set-confidence' | 'sync-private-state';
+    confidenceRank?: number | null;
   };
   type SavedRoomSession = {
     endpoint: string;
@@ -62,11 +64,14 @@
   let readyPlayers = $derived(roomView?.players.filter((player) => player.ready).length ?? 0);
   let me = $derived(roomView?.players.find((player) => player.id === mySessionId) ?? null);
   let isHost = $derived(Boolean(roomView && mySessionId && roomView.hostId === mySessionId));
+  let hasHandView = $derived(Boolean(roomView && roomView.phase !== 'lobby'));
   let isPlaying = $derived(roomView?.phase === 'playing');
+  let isFinished = $derived(roomView?.phase === 'finished');
   let holeCards = $derived(privateState?.holeCards ?? []);
   let boardSlots = $derived.by(() =>
     Array.from({ length: 5 }, (_, index) => roomView?.communityCards[index] ?? null)
   );
+  let confidenceSlots = $derived.by(() => Array.from({ length: totalPlayers }, (_, index) => index + 1));
   let canStart = $derived(
     Boolean(
       roomView &&
@@ -78,6 +83,15 @@
   );
   let canAdvanceStreet = $derived(
     Boolean(roomView && roomView.phase === 'playing' && isHost && roomView.street !== 'showdown')
+  );
+  let canResolveShowdown = $derived(
+    Boolean(
+      roomView &&
+        roomView.phase === 'playing' &&
+        roomView.street === 'showdown' &&
+        isHost &&
+        roomView.players.every((player) => player.confidenceRank !== null)
+    )
   );
   let advanceStreetLabel = $derived(roomView ? getAdvanceStreetLabel(roomView.street) : 'Advance street');
   let connectionLabel = $derived(
@@ -98,11 +112,15 @@
           : me
             ? 'You are at the table.'
             : 'Connect to take a seat.'
-        : isHost
-          ? 'You are pacing the table. Reveal each street when the team is ready.'
-          : me
-            ? 'Read your private hand, watch the shared board, and coordinate confidence.'
-            : 'Spectating the live table.'
+        : roomView.phase === 'playing'
+          ? isHost
+            ? 'Guide the team through each street and resolve the hand at showdown.'
+            : me
+              ? 'Read your cards, claim a confidence slot, and adjust as the board develops.'
+              : 'Spectating the live table.'
+          : roomView.outcome === 'success'
+            ? 'The team matched confidence to the actual hand order.'
+            : 'Compare the claimed order to the revealed actual rankings.'
   );
 
   function ensureClient() {
@@ -211,7 +229,7 @@
       setSnapshot(state);
       persistSession(nextRoom);
 
-      if (state.phase === 'playing' && previousPhase !== 'playing') {
+      if (state.phase !== 'lobby' && (!privateState?.holeCards.length || previousPhase !== state.phase)) {
         requestPrivateState(nextRoom);
       }
     });
@@ -234,7 +252,7 @@
       }
     });
 
-    if (nextRoom.state.phase === 'playing') {
+    if (nextRoom.state.phase !== 'lobby') {
       requestPrivateState(nextRoom);
     }
   }
@@ -315,6 +333,20 @@
     sendTableAction({ type: 'advance-street' });
   }
 
+  function resolveShowdown() {
+    sendTableAction({ type: 'resolve-showdown' });
+  }
+
+  function claimConfidenceRank(confidenceRank: number) {
+    if (roomView?.phase !== 'playing') return;
+    sendTableAction({ type: 'set-confidence', confidenceRank });
+  }
+
+  function clearConfidenceRank() {
+    if (roomView?.phase !== 'playing') return;
+    sendTableAction({ type: 'set-confidence', confidenceRank: null });
+  }
+
   async function copyRoomCode() {
     if (!roomView) return;
 
@@ -337,6 +369,17 @@
       .join(' ');
   }
 
+  function formatOutcomeLabel(outcome: GameOutcome) {
+    switch (outcome) {
+      case 'success':
+        return 'Matched';
+      case 'failure':
+        return 'Missed';
+      default:
+        return 'Pending';
+    }
+  }
+
   function getAdvanceStreetLabel(street: TableStreet) {
     switch (street) {
       case 'pre-flop':
@@ -354,16 +397,26 @@
 
   function playerStatus(player: PlayerView) {
     if (!player.connected) {
-      return roomView?.phase === 'playing' ? 'Disconnected mid-hand' : 'Away';
+      return roomView?.phase === 'lobby' ? 'Away' : 'Disconnected mid-hand';
+    }
+
+    if (roomView?.phase === 'finished') {
+      return player.handLabel ?? 'Showdown complete';
     }
 
     if (roomView?.phase === 'playing') {
-      return player.holeCardCount > 0
-        ? `${player.holeCardCount} private ${player.holeCardCount === 1 ? 'card' : 'cards'}`
-        : 'Waiting for the deal';
+      if (player.confidenceRank !== null) {
+        return `Claimed confidence slot #${player.confidenceRank}`;
+      }
+
+      return player.holeCardCount > 0 ? 'Still choosing confidence' : 'Waiting for the deal';
     }
 
     return player.ready ? 'Ready' : 'Waiting';
+  }
+
+  function confidenceSlotOwner(rank: number) {
+    return roomView?.players.find((player) => player.confidenceRank === rank) ?? null;
   }
 
   function cardRank(card: CardCode) {
@@ -387,6 +440,12 @@
   function cardTone(card: CardCode | null) {
     if (!card) return 'hidden';
     return isRedCard(card) ? 'red' : 'dark';
+  }
+
+  function confidenceSlotTone(rank: number, owner: PlayerView | null) {
+    if (owner?.id === mySessionId) return 'mine';
+    if (owner) return 'claimed';
+    return 'open';
   }
 
   onMount(() => {
@@ -414,7 +473,7 @@
   <title>The Gang</title>
   <meta
     name="description"
-    content="A digital tabletop for The Gang, with realtime lobby sync, private cards, and server-authoritative play state."
+    content="A digital tabletop for The Gang, with realtime lobby sync, private cards, confidence ordering, and server-authoritative showdown resolution."
   />
 </svelte:head>
 
@@ -489,20 +548,27 @@
           Disconnect
         </button>
 
-        {#if roomView?.phase === 'playing'}
-          <button type="button" class="ghost" onclick={() => requestPrivateState()} disabled={!roomView}>
-            Sync my cards
-          </button>
-          <button type="button" class="ghost" onclick={advanceStreet} disabled={!canAdvanceStreet}>
-            {advanceStreetLabel}
-          </button>
-        {:else}
-          <button type="button" class="ghost" onclick={() => void toggleReady()} disabled={!roomView || !me || roomView.phase !== 'lobby'}>
+        {#if roomView?.phase === 'lobby'}
+          <button type="button" class="ghost" onclick={() => void toggleReady()} disabled={!roomView || !me}>
             {me?.ready ? 'Mark unready' : 'Mark ready'}
           </button>
           <button type="button" class="ghost" onclick={startGame} disabled={!canStart}>
             Start game
           </button>
+        {:else if hasHandView}
+          <button type="button" class="ghost" onclick={() => requestPrivateState()} disabled={!roomView}>
+            Sync my cards
+          </button>
+
+          {#if canResolveShowdown}
+            <button type="button" class="ghost" onclick={resolveShowdown}>
+              Resolve showdown
+            </button>
+          {:else}
+            <button type="button" class="ghost" onclick={advanceStreet} disabled={!canAdvanceStreet}>
+              {advanceStreetLabel}
+            </button>
+          {/if}
         {/if}
       </div>
 
@@ -517,8 +583,23 @@
             <strong>{formatStreetLabel(roomView.street)}</strong>
           </div>
           <div>
-            <span class="meta-label">Your cards</span>
-            <strong>{holeCards.length}/2</strong>
+            <span class="meta-label">Your read</span>
+            <strong>{me?.confidenceRank ? `#${me.confidenceRank}` : 'Unset'}</strong>
+          </div>
+        </div>
+      {:else if roomView?.phase === 'finished'}
+        <div class={`play-brief outcome-${roomView.outcome}`}>
+          <div>
+            <span class="meta-label">Round</span>
+            <strong>{roomView.round}</strong>
+          </div>
+          <div>
+            <span class="meta-label">Outcome</span>
+            <strong>{formatOutcomeLabel(roomView.outcome)}</strong>
+          </div>
+          <div>
+            <span class="meta-label">Finished</span>
+            <strong>{formatTime(roomView.finishedAt)}</strong>
           </div>
         </div>
       {/if}
@@ -533,7 +614,7 @@
       <header>
         <div>
           <span class="eyebrow">Live table</span>
-          <h2>{roomView?.phase === 'playing' ? 'Co-op poker hand' : 'Room snapshot'}</h2>
+          <h2>{hasHandView ? 'Confidence table' : 'Room snapshot'}</h2>
         </div>
 
         {#if roomView}
@@ -552,14 +633,14 @@
             <strong>{connectedPlayers}/{roomView.maxPlayers}</strong>
           </div>
 
-          {#if roomView.phase === 'playing'}
+          {#if hasHandView}
             <div>
               <span class="meta-label">Street</span>
               <strong>{formatStreetLabel(roomView.street)}</strong>
             </div>
             <div>
-              <span class="meta-label">Round</span>
-              <strong>{roomView.round}</strong>
+              <span class="meta-label">Outcome</span>
+              <strong>{formatOutcomeLabel(roomView.outcome)}</strong>
             </div>
           {:else}
             <div>
@@ -578,7 +659,17 @@
           <p>{tableSubline}</p>
         </div>
 
-        {#if roomView.phase === 'playing'}
+        {#if roomView.phase === 'finished'}
+          <section class={`resolution panel-surface ${roomView.outcome}`}>
+            <div>
+              <span class="eyebrow">Round result</span>
+              <h3>{roomView.outcome === 'success' ? 'The order matched' : 'The order missed'}</h3>
+            </div>
+            <p>{roomView.outcome === 'success' ? 'Confidence and actual strength aligned.' : 'Use the revealed ranks to compare your read against reality.'}</p>
+          </section>
+        {/if}
+
+        {#if hasHandView}
           <section class="board panel-surface">
             <div class="surface-header">
               <div>
@@ -634,6 +725,60 @@
               </div>
             {/if}
           </section>
+
+          <section class="confidence-board panel-surface">
+            <div class="surface-header">
+              <div>
+                <span class="eyebrow">Confidence order</span>
+                <h3>Rank the table from weakest to strongest</h3>
+              </div>
+              <div class="street-meta">
+                <span>#1 = weakest read</span>
+                <span>#{totalPlayers} = strongest read</span>
+              </div>
+            </div>
+
+            <div class="confidence-grid">
+              {#each confidenceSlots as rank (rank)}
+                {@const owner = confidenceSlotOwner(rank)}
+                <button
+                  type="button"
+                  class={`confidence-slot ${confidenceSlotTone(rank, owner)}`}
+                  onclick={() => claimConfidenceRank(rank)}
+                  disabled={roomView.phase !== 'playing' || !me || Boolean(owner && owner.id !== mySessionId)}
+                >
+                  <span class="slot-label">#{rank}</span>
+                  <strong>{owner?.name ?? 'Open slot'}</strong>
+                  <small>
+                    {#if roomView.phase === 'finished'}
+                      {owner?.actualRank ? `Actual rank #${owner.actualRank}` : 'Unclaimed'}
+                    {:else if owner?.id === mySessionId}
+                      Your current claim
+                    {:else if owner}
+                      Claimed by {owner.name}
+                    {:else}
+                      Tap to claim
+                    {/if}
+                  </small>
+                </button>
+              {/each}
+            </div>
+
+            {#if roomView.phase === 'playing'}
+              <div class="confidence-actions">
+                <p>
+                  {#if me?.confidenceRank}
+                    You currently claim slot <strong>#{me.confidenceRank}</strong>.
+                  {:else}
+                    Claim the slot that matches your confidence in your hand strength.
+                  {/if}
+                </p>
+                <button type="button" class="ghost" onclick={clearConfidenceRank} disabled={!me?.confidenceRank}>
+                  Clear my slot
+                </button>
+              </div>
+            {/if}
+          </section>
         {/if}
 
         <ul class="players">
@@ -649,7 +794,7 @@
                   {#if player.id === roomView.hostId}
                     <span class="host">host</span>
                   {/if}
-                  {#if roomView.phase === 'playing'}
+                  {#if hasHandView}
                     <span class="seat-tag">seat {player.seat + 1}</span>
                     {#if roomView.dealerSeat === player.seat}
                       <span class="role-tag dealer">dealer</span>
@@ -657,12 +802,21 @@
                     {#if roomView.activeSeat === player.seat}
                       <span class="role-tag action">action</span>
                     {/if}
+                    {#if player.confidenceRank !== null}
+                      <span class="role-tag confidence">read {player.confidenceRank}</span>
+                    {/if}
+                    {#if roomView.phase === 'finished' && player.actualRank !== null}
+                      <span class="role-tag actual">actual {player.actualRank}</span>
+                    {/if}
                   {/if}
                 </div>
                 <p>{playerStatus(player)}</p>
+                {#if roomView.phase === 'finished' && player.handLabel}
+                  <p class="hand-label">{player.handLabel}</p>
+                {/if}
               </div>
               <div class="status-stack">
-                {#if roomView.phase === 'playing'}
+                {#if hasHandView}
                   <span class="card-count">{player.holeCardCount}</span>
                 {/if}
                 <div class={`status-dot ${player.connected ? (roomView.phase === 'lobby' ? (player.ready ? 'ready' : 'live') : 'live') : 'away'}`}></div>
@@ -915,7 +1069,8 @@
 
   .secondary,
   .ghost,
-  .copy {
+  .copy,
+  .confidence-slot {
     color: rgba(244, 238, 224, 0.94);
     background: rgba(244, 238, 224, 0.06);
     border: 1px solid rgba(243, 226, 186, 0.12);
@@ -946,6 +1101,14 @@
     gap: 0.75rem;
     border: 1px solid rgba(143, 208, 155, 0.12);
     background: linear-gradient(180deg, rgba(38, 72, 51, 0.28), rgba(22, 46, 31, 0.28));
+  }
+
+  .play-brief.outcome-success {
+    border-color: rgba(141, 224, 160, 0.28);
+  }
+
+  .play-brief.outcome-failure {
+    border-color: rgba(224, 140, 140, 0.24);
   }
 
   .banner {
@@ -1007,7 +1170,9 @@
     border: 1px solid rgba(243, 226, 186, 0.1);
   }
 
-  .table-state p {
+  .table-state p,
+  .resolution p,
+  .confidence-actions p {
     margin: 0;
     line-height: 1.6;
   }
@@ -1017,16 +1182,37 @@
     color: rgba(244, 238, 224, 0.78);
   }
 
+  .resolution,
   .board,
-  .private-hand {
+  .private-hand,
+  .confidence-board {
     margin-bottom: 1rem;
+  }
+
+  .resolution.success {
+    border-color: rgba(141, 224, 160, 0.22);
+    background: linear-gradient(180deg, rgba(48, 87, 57, 0.36), rgba(18, 38, 24, 0.36));
+  }
+
+  .resolution.failure {
+    border-color: rgba(224, 140, 140, 0.22);
+    background: linear-gradient(180deg, rgba(95, 43, 43, 0.32), rgba(35, 16, 16, 0.32));
+  }
+
+  .community-cards,
+  .hole-cards,
+  .confidence-grid {
+    display: grid;
+    gap: 0.8rem;
   }
 
   .community-cards,
   .hole-cards {
-    display: grid;
     grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
-    gap: 0.8rem;
+  }
+
+  .confidence-grid {
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
   }
 
   .table-card {
@@ -1084,7 +1270,8 @@
     opacity: 0.75;
   }
 
-  .private-empty {
+  .private-empty,
+  .confidence-actions {
     display: grid;
     gap: 0.8rem;
     align-items: center;
@@ -1092,9 +1279,46 @@
     padding: 0.25rem 0 0.1rem;
   }
 
-  .private-empty p {
-    margin: 0;
+  .private-empty p,
+  .confidence-actions p {
     color: rgba(244, 238, 224, 0.74);
+  }
+
+  .confidence-slot {
+    border-radius: 18px;
+    padding: 1rem;
+    display: grid;
+    gap: 0.4rem;
+    justify-items: start;
+    text-align: left;
+  }
+
+  .confidence-slot.mine {
+    border-color: rgba(213, 182, 111, 0.4);
+    background: linear-gradient(180deg, rgba(125, 97, 45, 0.34), rgba(48, 33, 12, 0.24));
+  }
+
+  .confidence-slot.claimed {
+    border-color: rgba(141, 224, 160, 0.24);
+  }
+
+  .confidence-slot.open {
+    border-style: dashed;
+  }
+
+  .confidence-slot strong {
+    font-size: 1rem;
+  }
+
+  .confidence-slot small,
+  .slot-label {
+    color: rgba(244, 238, 224, 0.7);
+  }
+
+  .slot-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
   }
 
   .players {
@@ -1162,6 +1386,10 @@
     color: rgba(244, 238, 224, 0.72);
   }
 
+  .hand-label {
+    color: rgba(243, 226, 186, 0.88);
+  }
+
   .self,
   .host,
   .seat-tag,
@@ -1198,6 +1426,16 @@
   .role-tag.action {
     color: #06100b;
     background: #f4e9bd;
+  }
+
+  .role-tag.confidence {
+    color: #06100b;
+    background: #d9c0ff;
+  }
+
+  .role-tag.actual {
+    color: #06100b;
+    background: #b5d8ff;
   }
 
   .status-stack {
@@ -1269,8 +1507,13 @@
     }
 
     .community-cards,
-    .hole-cards {
+    .hole-cards,
+    .confidence-grid {
       grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr));
+    }
+
+    .confidence-grid {
+      grid-template-columns: 1fr;
     }
 
     .table-card {

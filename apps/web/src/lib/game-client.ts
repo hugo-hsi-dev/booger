@@ -2,6 +2,7 @@ import { Client, type Room } from './colyseus-client.js';
 import { GameStateSchema } from './room-schema';
 
 export type RoomPhase = 'lobby' | 'playing' | 'finished';
+export type GameOutcome = 'pending' | 'success' | 'failure';
 export type TableStreet = 'idle' | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown';
 export type CardSuit = 'S' | 'H' | 'D' | 'C';
 export type CardRank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | 'T' | 'J' | 'Q' | 'K' | 'A';
@@ -14,6 +15,9 @@ export interface PlayerView {
   ready: boolean;
   seat: number;
   holeCardCount: number;
+  confidenceRank: number | null;
+  actualRank: number | null;
+  handLabel: string | null;
 }
 
 export interface RoomView {
@@ -22,6 +26,7 @@ export interface RoomView {
   hostId: string;
   maxPlayers: number;
   status: string;
+  outcome: GameOutcome;
   createdAt: number;
   startedAt: number;
   finishedAt: number;
@@ -101,6 +106,7 @@ export function toRoomView(state: GameStateSnapshot): RoomView {
     hostId: state.hostId,
     maxPlayers: state.maxPlayers,
     status: state.status,
+    outcome: state.outcome ?? 'pending',
     createdAt: state.createdAt,
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
@@ -120,7 +126,10 @@ function toPlayerView(player: PlayerView): PlayerView {
     connected: player.connected,
     ready: player.ready,
     seat: player.seat,
-    holeCardCount: player.holeCardCount ?? 0
+    holeCardCount: player.holeCardCount ?? 0,
+    confidenceRank: player.confidenceRank === -1 ? null : player.confidenceRank,
+    actualRank: player.actualRank === -1 ? null : player.actualRank,
+    handLabel: player.handLabel || null
   };
 }
 

@@ -8,6 +8,9 @@ type('boolean')(PlayerSchema.prototype, 'connected');
 type('boolean')(PlayerSchema.prototype, 'ready');
 type('number')(PlayerSchema.prototype, 'seat');
 type('number')(PlayerSchema.prototype, 'holeCardCount');
+type('number')(PlayerSchema.prototype, 'confidenceRank');
+type('number')(PlayerSchema.prototype, 'actualRank');
+type('string')(PlayerSchema.prototype, 'handLabel');
 
 export class GameStateSchema extends Schema {}
 
@@ -16,6 +19,7 @@ type('string')(GameStateSchema.prototype, 'phase');
 type('string')(GameStateSchema.prototype, 'hostId');
 type('number')(GameStateSchema.prototype, 'maxPlayers');
 type('string')(GameStateSchema.prototype, 'status');
+type('string')(GameStateSchema.prototype, 'outcome');
 type([PlayerSchema])(GameStateSchema.prototype, 'players');
 type('number')(GameStateSchema.prototype, 'createdAt');
 type('number')(GameStateSchema.prototype, 'startedAt');

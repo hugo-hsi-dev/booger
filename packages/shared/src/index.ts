@@ -1,6 +1,6 @@
 import { ArraySchema, Schema, type } from '@colyseus/schema';
 
-import type { CardCode, GamePhase, GamePlayer, GameState, TableStreet } from '@booger/game';
+import type { CardCode, GameOutcome, GamePhase, GamePlayer, GameState, TableStreet } from '@booger/game';
 
 export class PlayerSchema extends Schema {
   @type('string') id = '';
@@ -9,6 +9,9 @@ export class PlayerSchema extends Schema {
   @type('boolean') ready = false;
   @type('number') seat = 0;
   @type('number') holeCardCount = 0;
+  @type('number') confidenceRank = -1;
+  @type('number') actualRank = -1;
+  @type('string') handLabel = '';
 }
 
 export class GameStateSchema extends Schema {
@@ -17,6 +20,7 @@ export class GameStateSchema extends Schema {
   @type('string') hostId = '';
   @type('number') maxPlayers = 6;
   @type('string') status = 'Waiting for players';
+  @type('string') outcome: GameOutcome = 'pending';
   @type([PlayerSchema]) players = new ArraySchema<PlayerSchema>();
   @type('number') createdAt = 0;
   @type('number') startedAt = 0;
@@ -36,6 +40,9 @@ function toPlayerSchema(player: GamePlayer) {
   schema.ready = player.ready;
   schema.seat = player.seat;
   schema.holeCardCount = player.holeCardCount;
+  schema.confidenceRank = player.confidenceRank ?? -1;
+  schema.actualRank = player.actualRank ?? -1;
+  schema.handLabel = player.handLabel ?? '';
   return schema;
 }
 
@@ -51,6 +58,7 @@ export function syncRoomState(roomState: GameStateSchema, state: GameState) {
   roomState.hostId = state.hostId ?? '';
   roomState.maxPlayers = state.maxPlayers;
   roomState.status = state.status;
+  roomState.outcome = state.outcome;
   roomState.createdAt = state.createdAt;
   roomState.startedAt = state.startedAt ?? 0;
   roomState.finishedAt = state.finishedAt ?? 0;

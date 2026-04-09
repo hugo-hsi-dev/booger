@@ -3,9 +3,12 @@ import { Client, Room } from 'colyseus';
 import {
   addPlayer,
   advanceStreet,
+  canResolveShowdown,
   createInitialGameState,
   getPlayerHand,
   removePlayer,
+  resolveShowdown,
+  setPlayerConfidence,
   setPlayerConnected,
   setPlayerReady,
   startGame,
@@ -25,7 +28,8 @@ interface LobbyActionMessage {
 }
 
 interface TableActionMessage {
-  type: 'advance-street' | 'sync-private-state';
+  type: 'advance-street' | 'resolve-showdown' | 'set-confidence' | 'sync-private-state';
+  confidenceRank?: number | null;
 }
 
 interface PrivateStateMessage {
@@ -74,12 +78,32 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
         return;
       }
 
+      if (message.type === 'set-confidence') {
+        this.gameState = setPlayerConfidence(
+          this.gameState,
+          client.sessionId,
+          message.confidenceRank ?? null
+        );
+        this.syncState();
+        return;
+      }
+
+      if (client.sessionId !== this.gameState.hostId) {
+        return;
+      }
+
       if (message.type === 'advance-street') {
-        if (client.sessionId !== this.gameState.hostId) {
+        this.gameState = advanceStreet(this.gameState);
+        this.syncState();
+        return;
+      }
+
+      if (message.type === 'resolve-showdown') {
+        if (!canResolveShowdown(this.gameState)) {
           return;
         }
 
-        this.gameState = advanceStreet(this.gameState);
+        this.gameState = resolveShowdown(this.gameState);
         this.syncState();
       }
     });

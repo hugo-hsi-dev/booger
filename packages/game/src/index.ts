@@ -1,4 +1,5 @@
 export type GamePhase = 'lobby' | 'playing' | 'finished';
+export type GameOutcome = 'pending' | 'success' | 'failure';
 export type TableStreet = 'idle' | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown';
 export type CardSuit = 'S' | 'H' | 'D' | 'C';
 export type CardRank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | 'T' | 'J' | 'Q' | 'K' | 'A';
@@ -12,6 +13,9 @@ export interface GamePlayer {
   ready: boolean;
   seat: number;
   holeCardCount: number;
+  confidenceRank: number | null;
+  actualRank: number | null;
+  handLabel: string | null;
 }
 
 export interface GameState {
@@ -20,6 +24,7 @@ export interface GameState {
   hostId: string | null;
   maxPlayers: number;
   status: string;
+  outcome: GameOutcome;
   players: GamePlayer[];
   createdAt: number;
   startedAt: number | null;
@@ -33,9 +38,30 @@ export interface GameState {
   privateHands: Record<string, CardCode[]>;
 }
 
+interface HandScore {
+  category: number;
+  values: number[];
+  label: string;
+}
+
 const DEFAULT_MAX_PLAYERS = 6;
 const CARD_SUITS = ['S', 'H', 'D', 'C'] as const;
 const CARD_RANKS = ['2', '3', '4', '5', '6', '7', '8', '9', 'T', 'J', 'Q', 'K', 'A'] as const;
+const RANK_VALUE: Record<CardRank, number> = {
+  '2': 2,
+  '3': 3,
+  '4': 4,
+  '5': 5,
+  '6': 6,
+  '7': 7,
+  '8': 8,
+  '9': 9,
+  T: 10,
+  J: 11,
+  Q: 12,
+  K: 13,
+  A: 14
+};
 
 function describeLobbyStatus(state: Pick<GameState, 'players'>) {
   if (state.players.length === 0) {
@@ -62,10 +88,22 @@ function describePlayingStatus(street: TableStreet) {
     case 'river':
       return 'River revealed. Finalise your confidence read.';
     case 'showdown':
-      return 'Showdown. Compare confidence and prepare to score the hand.';
+      return 'Showdown. Lock your confidence order, then resolve the hand.';
     default:
       return 'Waiting for players';
   }
+}
+
+function createPlayer(base: Pick<GamePlayer, 'id' | 'name' | 'connected'>, seat: number): GamePlayer {
+  return {
+    ...base,
+    ready: false,
+    seat,
+    holeCardCount: 0,
+    confidenceRank: null,
+    actualRank: null,
+    handLabel: null
+  };
 }
 
 function reindexPlayers(players: GamePlayer[]) {
@@ -112,6 +150,196 @@ function drawCards(deck: CardCode[], count: number) {
   };
 }
 
+function combinationIndices(length: number, size: number) {
+  const results: number[][] = [];
+  const combination: number[] = [];
+
+  function walk(start: number) {
+    if (combination.length === size) {
+      results.push([...combination]);
+      return;
+    }
+
+    for (let index = start; index <= length - (size - combination.length); index += 1) {
+      combination.push(index);
+      walk(index + 1);
+      combination.pop();
+    }
+  }
+
+  walk(0);
+  return results;
+}
+
+function parseCard(card: CardCode) {
+  return {
+    rank: card.slice(0, -1) as CardRank,
+    suit: card.slice(-1) as CardSuit,
+    value: RANK_VALUE[card.slice(0, -1) as CardRank]
+  };
+}
+
+function getStraightHigh(values: number[]) {
+  const unique = [...new Set(values)].sort((left, right) => left - right);
+
+  if (unique.includes(14)) {
+    unique.unshift(1);
+  }
+
+  let run = 1;
+  let best: number | null = null;
+
+  for (let index = 1; index < unique.length; index += 1) {
+    const current = unique[index]!;
+    const previous = unique[index - 1]!;
+
+    if (current === previous + 1) {
+      run += 1;
+      if (run >= 5) {
+        best = current;
+      }
+    } else {
+      run = 1;
+    }
+  }
+
+  return best;
+}
+
+function evaluateFiveCardHand(cards: CardCode[]): HandScore {
+  const parsed = cards.map(parseCard);
+  const ranks = parsed.map((card) => card.value).sort((left, right) => right - left);
+  const suits = parsed.map((card) => card.suit);
+  const rankCounts = new Map<number, number>();
+
+  for (const rank of ranks) {
+    rankCounts.set(rank, (rankCounts.get(rank) ?? 0) + 1);
+  }
+
+  const groups = [...rankCounts.entries()]
+    .map(([rank, count]) => ({ rank, count }))
+    .sort((left, right) => right.count - left.count || right.rank - left.rank);
+
+  const flush = suits.every((suit) => suit === suits[0]);
+  const straightHigh = getStraightHigh(ranks);
+
+  if (flush && straightHigh !== null) {
+    return {
+      category: 8,
+      values: [straightHigh],
+      label: 'Straight flush'
+    };
+  }
+
+  if (groups[0]?.count === 4) {
+    return {
+      category: 7,
+      values: [groups[0].rank, groups[1]?.rank ?? 0],
+      label: 'Four of a kind'
+    };
+  }
+
+  if (groups[0]?.count === 3 && groups[1]?.count === 2) {
+    return {
+      category: 6,
+      values: [groups[0].rank, groups[1].rank],
+      label: 'Full house'
+    };
+  }
+
+  if (flush) {
+    return {
+      category: 5,
+      values: ranks,
+      label: 'Flush'
+    };
+  }
+
+  if (straightHigh !== null) {
+    return {
+      category: 4,
+      values: [straightHigh],
+      label: 'Straight'
+    };
+  }
+
+  if (groups[0]?.count === 3) {
+    const kickers = groups.slice(1).map((group) => group.rank).sort((left, right) => right - left);
+    return {
+      category: 3,
+      values: [groups[0].rank, ...kickers],
+      label: 'Three of a kind'
+    };
+  }
+
+  if (groups[0]?.count === 2 && groups[1]?.count === 2) {
+    const pairRanks = groups
+      .filter((group) => group.count === 2)
+      .map((group) => group.rank)
+      .sort((left, right) => right - left);
+    const kicker = groups.find((group) => group.count === 1)?.rank ?? 0;
+    return {
+      category: 2,
+      values: [pairRanks[0] ?? 0, pairRanks[1] ?? 0, kicker],
+      label: 'Two pair'
+    };
+  }
+
+  if (groups[0]?.count === 2) {
+    const kickers = groups.slice(1).map((group) => group.rank).sort((left, right) => right - left);
+    return {
+      category: 1,
+      values: [groups[0].rank, ...kickers],
+      label: 'One pair'
+    };
+  }
+
+  return {
+    category: 0,
+    values: ranks,
+    label: 'High card'
+  };
+}
+
+function compareHandScores(left: HandScore, right: HandScore) {
+  if (left.category !== right.category) {
+    return left.category - right.category;
+  }
+
+  const limit = Math.max(left.values.length, right.values.length);
+
+  for (let index = 0; index < limit; index += 1) {
+    const difference = (left.values[index] ?? 0) - (right.values[index] ?? 0);
+    if (difference !== 0) {
+      return difference;
+    }
+  }
+
+  return 0;
+}
+
+function evaluateBestHand(cards: CardCode[]) {
+  if (cards.length < 5) {
+    throw new Error('At least five cards are required to evaluate a hand');
+  }
+
+  let best: HandScore | null = null;
+
+  for (const indices of combinationIndices(cards.length, 5)) {
+    const score = evaluateFiveCardHand(indices.map((index) => cards[index]!));
+
+    if (!best || compareHandScores(score, best) > 0) {
+      best = score;
+    }
+  }
+
+  if (!best) {
+    throw new Error('Failed to evaluate a best hand');
+  }
+
+  return best;
+}
+
 export function createDeck(): CardCode[] {
   const deck: CardCode[] = [];
 
@@ -142,6 +370,7 @@ export function createInitialGameState(roomId = '', maxPlayers = DEFAULT_MAX_PLA
     hostId: null,
     maxPlayers,
     status: 'Waiting for players',
+    outcome: 'pending',
     players: [],
     createdAt: Date.now(),
     startedAt: null,
@@ -174,12 +403,7 @@ export function addPlayer(
 
   const players = reindexPlayers([
     ...state.players,
-    {
-      ...player,
-      ready: false,
-      seat: state.players.length,
-      holeCardCount: 0
-    }
+    createPlayer(player, state.players.length)
   ]);
 
   return {
@@ -236,6 +460,36 @@ export function setPlayerReady(state: GameState, playerId: string, ready: boolea
   };
 }
 
+export function setPlayerConfidence(state: GameState, playerId: string, confidenceRank: number | null): GameState {
+  if (state.phase !== 'playing') {
+    return state;
+  }
+
+  if (confidenceRank !== null && (!Number.isInteger(confidenceRank) || confidenceRank < 1 || confidenceRank > state.players.length)) {
+    throw new Error('Confidence slot is out of range');
+  }
+
+  const owner =
+    confidenceRank === null
+      ? null
+      : state.players.find((player) => player.id !== playerId && player.confidenceRank === confidenceRank);
+
+  if (owner) {
+    throw new Error('Confidence slot already taken');
+  }
+
+  const players = reindexPlayers(
+    state.players.map((player) =>
+      player.id === playerId ? { ...player, confidenceRank } : player
+    )
+  );
+
+  return {
+    ...state,
+    players
+  };
+}
+
 export function canStartGame(state: GameState) {
   return (
     state.phase === 'lobby' &&
@@ -262,7 +516,10 @@ export function startGame(state: GameState, rng: GameRng = Math.random): GameSta
   const players = state.players.map((player) => ({
     ...player,
     ready: false,
-    holeCardCount: privateHands[player.id]?.length ?? 0
+    holeCardCount: privateHands[player.id]?.length ?? 0,
+    confidenceRank: null,
+    actualRank: null,
+    handLabel: null
   }));
   const dealerSeat = players[0]?.seat ?? null;
 
@@ -272,8 +529,9 @@ export function startGame(state: GameState, rng: GameRng = Math.random): GameSta
     startedAt: Date.now(),
     finishedAt: null,
     status: describePlayingStatus('pre-flop'),
+    outcome: 'pending',
     players,
-    round: 1,
+    round: state.round + 1,
     street: 'pre-flop',
     dealerSeat,
     activeSeat: dealerSeat,
@@ -325,6 +583,62 @@ export function advanceStreet(state: GameState): GameState {
   };
 }
 
+export function canResolveShowdown(state: GameState) {
+  return (
+    state.phase === 'playing' &&
+    state.street === 'showdown' &&
+    state.players.length >= 2 &&
+    state.players.every((player) => player.confidenceRank !== null)
+  );
+}
+
+export function resolveShowdown(state: GameState): GameState {
+  if (!canResolveShowdown(state)) {
+    throw new Error('Showdown cannot be resolved yet');
+  }
+
+  const ranking = state.players
+    .map((player) => ({
+      playerId: player.id,
+      seat: player.seat,
+      score: evaluateBestHand([...getPlayerHand(state, player.id), ...state.communityCards])
+    }))
+    .sort((left, right) => compareHandScores(left.score, right.score) || left.seat - right.seat);
+
+  const hadTie = ranking.some((entry, index) => {
+    const previous = ranking[index - 1];
+    return previous ? compareHandScores(entry.score, previous.score) === 0 : false;
+  });
+
+  const players = reindexPlayers(
+    state.players.map((player) => {
+      const ranked = ranking.find((entry) => entry.playerId === player.id);
+      const actualRank = ranked ? ranking.indexOf(ranked) + 1 : null;
+
+      return {
+        ...player,
+        actualRank,
+        handLabel: ranked?.score.label ?? null
+      };
+    })
+  );
+
+  const success = players.every((player) => player.confidenceRank === player.actualRank);
+  const tieSuffix = hadTie ? ' Ties are broken by seat order in this MVP.' : '';
+
+  return {
+    ...state,
+    phase: 'finished',
+    finishedAt: Date.now(),
+    activeSeat: null,
+    outcome: success ? 'success' : 'failure',
+    players,
+    status: success
+      ? `Confidence order matched the actual hand strength.${tieSuffix}`
+      : `Confidence order missed the actual hand strength.${tieSuffix}`
+  };
+}
+
 export function getPlayerHand(state: GameState, playerId: string): CardCode[] {
   return [...(state.privateHands[playerId] ?? [])];
 }
@@ -336,6 +650,7 @@ export function finishGame(state: GameState, winnerId: string | null = null): Ga
     finishedAt: Date.now(),
     street: 'showdown',
     activeSeat: null,
+    outcome: winnerId ? 'success' : state.outcome,
     status: winnerId ? `Winner: ${winnerId}` : 'Game finished'
   };
 }
