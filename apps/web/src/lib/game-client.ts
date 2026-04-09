@@ -2,6 +2,10 @@ import { Client, type Room } from './colyseus-client.js';
 import { GameStateSchema } from './room-schema';
 
 export type RoomPhase = 'lobby' | 'playing' | 'finished';
+export type TableStreet = 'idle' | 'pre-flop' | 'flop' | 'turn' | 'river' | 'showdown';
+export type CardSuit = 'S' | 'H' | 'D' | 'C';
+export type CardRank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | 'T' | 'J' | 'Q' | 'K' | 'A';
+export type CardCode = `${CardRank}${CardSuit}`;
 
 export interface PlayerView {
   id: string;
@@ -9,6 +13,7 @@ export interface PlayerView {
   connected: boolean;
   ready: boolean;
   seat: number;
+  holeCardCount: number;
 }
 
 export interface RoomView {
@@ -20,12 +25,25 @@ export interface RoomView {
   createdAt: number;
   startedAt: number;
   finishedAt: number;
+  round: number;
+  street: TableStreet;
+  dealerSeat: number | null;
+  activeSeat: number | null;
+  communityCards: CardCode[];
   players: PlayerView[];
+}
+
+export interface PrivateStateMessage {
+  holeCards: CardCode[];
+  round: number;
+  street: TableStreet;
 }
 
 export interface GameStateSnapshot extends RoomView {}
 
 export const ROOM_NAME = 'game';
+export const PRIVATE_STATE_MESSAGE = 'private-state';
+export const TABLE_ACTION_MESSAGE = 'table-action';
 
 export function createGameClient(endpoint: string) {
   return new Client(endpoint);
@@ -86,6 +104,11 @@ export function toRoomView(state: GameStateSnapshot): RoomView {
     createdAt: state.createdAt,
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
+    round: state.round ?? 0,
+    street: state.street ?? 'idle',
+    dealerSeat: state.dealerSeat === -1 ? null : state.dealerSeat,
+    activeSeat: state.activeSeat === -1 ? null : state.activeSeat,
+    communityCards: [...(state.communityCards ?? [])],
     players: (state.players ?? []).map(toPlayerView)
   };
 }
@@ -96,7 +119,8 @@ function toPlayerView(player: PlayerView): PlayerView {
     name: player.name,
     connected: player.connected,
     ready: player.ready,
-    seat: player.seat
+    seat: player.seat,
+    holeCardCount: player.holeCardCount ?? 0
   };
 }
 

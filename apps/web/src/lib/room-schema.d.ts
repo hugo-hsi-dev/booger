@@ -4,6 +4,7 @@ export declare class PlayerSchema {
   connected: boolean;
   ready: boolean;
   seat: number;
+  holeCardCount: number;
 }
 
 export declare class GameStateSchema {
@@ -16,4 +17,9 @@ export declare class GameStateSchema {
   createdAt: number;
   startedAt: number;
   finishedAt: number;
+  round: number;
+  street: string;
+  dealerSeat: number;
+  activeSeat: number;
+  communityCards: string[];
 }

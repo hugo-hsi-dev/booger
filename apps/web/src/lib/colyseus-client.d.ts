@@ -17,6 +17,7 @@ export type Room<State = any> = {
   name: string;
   state: State;
   send<T = any>(type: string | number, message?: T): void;
+  onMessage<T = any>(type: string | number, callback: (message: T) => void): () => void;
   leave(consented?: boolean): Promise<number>;
   removeAllListeners(): void;
   onStateChange: ((cb: (state: State) => void) => void) & {

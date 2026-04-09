@@ -1,6 +1,6 @@
 import { ArraySchema, Schema, type } from '@colyseus/schema';
 
-import type { GamePhase, GamePlayer, GameState } from '@booger/game';
+import type { CardCode, GamePhase, GamePlayer, GameState, TableStreet } from '@booger/game';
 
 export class PlayerSchema extends Schema {
   @type('string') id = '';
@@ -8,6 +8,7 @@ export class PlayerSchema extends Schema {
   @type('boolean') connected = false;
   @type('boolean') ready = false;
   @type('number') seat = 0;
+  @type('number') holeCardCount = 0;
 }
 
 export class GameStateSchema extends Schema {
@@ -20,6 +21,11 @@ export class GameStateSchema extends Schema {
   @type('number') createdAt = 0;
   @type('number') startedAt = 0;
   @type('number') finishedAt = 0;
+  @type('number') round = 0;
+  @type('string') street: TableStreet = 'idle';
+  @type('number') dealerSeat = -1;
+  @type('number') activeSeat = -1;
+  @type(['string']) communityCards = new ArraySchema<CardCode>();
 }
 
 function toPlayerSchema(player: GamePlayer) {
@@ -29,6 +35,7 @@ function toPlayerSchema(player: GamePlayer) {
   schema.connected = player.connected;
   schema.ready = player.ready;
   schema.seat = player.seat;
+  schema.holeCardCount = player.holeCardCount;
   return schema;
 }
 
@@ -47,8 +54,16 @@ export function syncRoomState(roomState: GameStateSchema, state: GameState) {
   roomState.createdAt = state.createdAt;
   roomState.startedAt = state.startedAt ?? 0;
   roomState.finishedAt = state.finishedAt ?? 0;
+  roomState.round = state.round;
+  roomState.street = state.street;
+  roomState.dealerSeat = state.dealerSeat ?? -1;
+  roomState.activeSeat = state.activeSeat ?? -1;
   roomState.players.clear();
   for (const player of state.players) {
     roomState.players.push(toPlayerSchema(player));
+  }
+  roomState.communityCards.clear();
+  for (const card of state.communityCards) {
+    roomState.communityCards.push(card);
   }
 }

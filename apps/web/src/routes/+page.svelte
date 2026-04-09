@@ -6,18 +6,27 @@
     createRoom,
     getServerEndpoint,
     joinRoom,
+    PRIVATE_STATE_MESSAGE,
     reconnectRoom,
     ROOM_NAME,
+    TABLE_ACTION_MESSAGE,
     toRoomView,
+    type CardCode,
+    type CardSuit,
     type GameRoomClient,
     type PlayerView,
-    type RoomView
+    type PrivateStateMessage,
+    type RoomView,
+    type TableStreet
   } from '$lib/game-client';
 
   type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
   type LobbyActionMessage = {
     type: 'set-ready' | 'start-game';
     ready?: boolean;
+  };
+  type TableActionMessage = {
+    type: 'advance-street' | 'sync-private-state';
   };
   type SavedRoomSession = {
     endpoint: string;
@@ -28,6 +37,12 @@
 
   const endpoint = getServerEndpoint();
   const SESSION_STORAGE_KEY = 'booger:lobby-session';
+  const SUIT_SYMBOLS: Record<CardSuit, string> = {
+    S: '♠',
+    H: '♥',
+    D: '♦',
+    C: '♣'
+  };
 
   let playerName = $state('Player');
   let roomCode = $state('');
@@ -36,6 +51,7 @@
   let errorMessage = $state('');
   let mySessionId = $state('');
   let roomView = $state<RoomView | null>(null);
+  let privateState = $state<PrivateStateMessage | null>(null);
   let isPageUnloading = false;
 
   let client = $state.raw<ReturnType<typeof createGameClient> | null>(null);
@@ -46,6 +62,11 @@
   let readyPlayers = $derived(roomView?.players.filter((player) => player.ready).length ?? 0);
   let me = $derived(roomView?.players.find((player) => player.id === mySessionId) ?? null);
   let isHost = $derived(Boolean(roomView && mySessionId && roomView.hostId === mySessionId));
+  let isPlaying = $derived(roomView?.phase === 'playing');
+  let holeCards = $derived(privateState?.holeCards ?? []);
+  let boardSlots = $derived.by(() =>
+    Array.from({ length: 5 }, (_, index) => roomView?.communityCards[index] ?? null)
+  );
   let canStart = $derived(
     Boolean(
       roomView &&
@@ -55,6 +76,10 @@
         roomView.players.every((player) => player.connected && player.ready)
     )
   );
+  let canAdvanceStreet = $derived(
+    Boolean(roomView && roomView.phase === 'playing' && isHost && roomView.street !== 'showdown')
+  );
+  let advanceStreetLabel = $derived(roomView ? getAdvanceStreetLabel(roomView.street) : 'Advance street');
   let connectionLabel = $derived(
     connectionState === 'connecting'
       ? 'connecting'
@@ -63,6 +88,21 @@
         : connectionState === 'error'
           ? 'error'
           : 'idle'
+  );
+  let tableSubline = $derived(
+    !roomView
+      ? 'Connect to take a seat.'
+      : roomView.phase === 'lobby'
+        ? isHost
+          ? 'You are the host.'
+          : me
+            ? 'You are at the table.'
+            : 'Connect to take a seat.'
+        : isHost
+          ? 'You are pacing the table. Reveal each street when the team is ready.'
+          : me
+            ? 'Read your private hand, watch the shared board, and coordinate confidence.'
+            : 'Spectating the live table.'
   );
 
   function ensureClient() {
@@ -76,6 +116,7 @@
 
   function resetRoomState() {
     roomView = null;
+    privateState = null;
     mySessionId = '';
   }
 
@@ -135,6 +176,18 @@
     await existingRoom.leave(consented).catch(() => undefined);
   }
 
+  function sendLobbyAction(action: LobbyActionMessage) {
+    room?.send('lobby-action', action);
+  }
+
+  function sendTableAction(action: TableActionMessage, targetRoom: GameRoomClient | null = room) {
+    targetRoom?.send(TABLE_ACTION_MESSAGE, action);
+  }
+
+  function requestPrivateState(targetRoom: GameRoomClient | null = room) {
+    sendTableAction({ type: 'sync-private-state' }, targetRoom);
+  }
+
   function bindRoom(nextRoom: GameRoomClient, nextBanner: string) {
     room = nextRoom;
     mySessionId = nextRoom.sessionId;
@@ -145,9 +198,22 @@
     isPageUnloading = false;
     persistSession(nextRoom);
 
+    nextRoom.onMessage<PrivateStateMessage>(PRIVATE_STATE_MESSAGE, (message) => {
+      privateState = {
+        holeCards: [...(message.holeCards ?? [])],
+        round: message.round,
+        street: message.street
+      };
+    });
+
     nextRoom.onStateChange((state) => {
+      const previousPhase = roomView?.phase;
       setSnapshot(state);
       persistSession(nextRoom);
+
+      if (state.phase === 'playing' && previousPhase !== 'playing') {
+        requestPrivateState(nextRoom);
+      }
     });
 
     nextRoom.onError((code, message) => {
@@ -167,6 +233,10 @@
         clearSavedSession();
       }
     });
+
+    if (nextRoom.state.phase === 'playing') {
+      requestPrivateState(nextRoom);
+    }
   }
 
   async function reconnectSavedSession(savedSession: SavedRoomSession) {
@@ -233,16 +303,16 @@
     await room.leave().catch(() => undefined);
   }
 
-  function sendLobbyAction(action: LobbyActionMessage) {
-    room?.send('lobby-action', action);
-  }
-
   function toggleReady() {
     sendLobbyAction({ type: 'set-ready', ready: !(me?.ready ?? false) });
   }
 
   function startGame() {
     sendLobbyAction({ type: 'start-game' });
+  }
+
+  function advanceStreet() {
+    sendTableAction({ type: 'advance-street' });
   }
 
   async function copyRoomCode() {
@@ -260,9 +330,63 @@
     return value ? new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—';
   }
 
+  function formatStreetLabel(street: TableStreet) {
+    return street
+      .split('-')
+      .map((part: string) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }
+
+  function getAdvanceStreetLabel(street: TableStreet) {
+    switch (street) {
+      case 'pre-flop':
+        return 'Reveal flop';
+      case 'flop':
+        return 'Reveal turn';
+      case 'turn':
+        return 'Reveal river';
+      case 'river':
+        return 'Go to showdown';
+      default:
+        return 'Street complete';
+    }
+  }
+
   function playerStatus(player: PlayerView) {
-    if (!player.connected) return 'Away';
+    if (!player.connected) {
+      return roomView?.phase === 'playing' ? 'Disconnected mid-hand' : 'Away';
+    }
+
+    if (roomView?.phase === 'playing') {
+      return player.holeCardCount > 0
+        ? `${player.holeCardCount} private ${player.holeCardCount === 1 ? 'card' : 'cards'}`
+        : 'Waiting for the deal';
+    }
+
     return player.ready ? 'Ready' : 'Waiting';
+  }
+
+  function cardRank(card: CardCode) {
+    const rank = card.slice(0, -1);
+    return rank === 'T' ? '10' : rank;
+  }
+
+  function cardSuit(card: CardCode) {
+    return card.slice(-1) as CardSuit;
+  }
+
+  function cardSuitSymbol(card: CardCode) {
+    return SUIT_SYMBOLS[cardSuit(card)];
+  }
+
+  function isRedCard(card: CardCode) {
+    const suit = cardSuit(card);
+    return suit === 'H' || suit === 'D';
+  }
+
+  function cardTone(card: CardCode | null) {
+    if (!card) return 'hidden';
+    return isRedCard(card) ? 'red' : 'dark';
   }
 
   onMount(() => {
@@ -290,7 +414,7 @@
   <title>The Gang</title>
   <meta
     name="description"
-    content="A digital tabletop for The Gang, with realtime lobby sync and server-authoritative game state."
+    content="A digital tabletop for The Gang, with realtime lobby sync, private cards, and server-authoritative play state."
   />
 </svelte:head>
 
@@ -364,13 +488,40 @@
         <button type="button" class="ghost" onclick={() => void disconnect()} disabled={!roomView}>
           Disconnect
         </button>
-        <button type="button" class="ghost" onclick={() => void toggleReady()} disabled={!roomView || !me}>
-          {me?.ready ? 'Mark unready' : 'Mark ready'}
-        </button>
-        <button type="button" class="ghost" onclick={startGame} disabled={!canStart}>
-          Start game
-        </button>
+
+        {#if roomView?.phase === 'playing'}
+          <button type="button" class="ghost" onclick={() => requestPrivateState()} disabled={!roomView}>
+            Sync my cards
+          </button>
+          <button type="button" class="ghost" onclick={advanceStreet} disabled={!canAdvanceStreet}>
+            {advanceStreetLabel}
+          </button>
+        {:else}
+          <button type="button" class="ghost" onclick={() => void toggleReady()} disabled={!roomView || !me || roomView.phase !== 'lobby'}>
+            {me?.ready ? 'Mark unready' : 'Mark ready'}
+          </button>
+          <button type="button" class="ghost" onclick={startGame} disabled={!canStart}>
+            Start game
+          </button>
+        {/if}
       </div>
+
+      {#if roomView?.phase === 'playing'}
+        <div class="play-brief">
+          <div>
+            <span class="meta-label">Round</span>
+            <strong>{roomView.round}</strong>
+          </div>
+          <div>
+            <span class="meta-label">Street</span>
+            <strong>{formatStreetLabel(roomView.street)}</strong>
+          </div>
+          <div>
+            <span class="meta-label">Your cards</span>
+            <strong>{holeCards.length}/2</strong>
+          </div>
+        </div>
+      {/if}
 
       <p class="banner" aria-live="polite">{banner}</p>
       {#if errorMessage}
@@ -382,7 +533,7 @@
       <header>
         <div>
           <span class="eyebrow">Live table</span>
-          <h2>Room snapshot</h2>
+          <h2>{roomView?.phase === 'playing' ? 'Co-op poker hand' : 'Room snapshot'}</h2>
         </div>
 
         {#if roomView}
@@ -400,24 +551,94 @@
             <span class="meta-label">Players</span>
             <strong>{connectedPlayers}/{roomView.maxPlayers}</strong>
           </div>
-          <div>
-            <span class="meta-label">Ready</span>
-            <strong>{readyPlayers}/{totalPlayers}</strong>
-          </div>
-          <div>
-            <span class="meta-label">Created</span>
-            <strong>{formatTime(roomView.createdAt)}</strong>
-          </div>
+
+          {#if roomView.phase === 'playing'}
+            <div>
+              <span class="meta-label">Street</span>
+              <strong>{formatStreetLabel(roomView.street)}</strong>
+            </div>
+            <div>
+              <span class="meta-label">Round</span>
+              <strong>{roomView.round}</strong>
+            </div>
+          {:else}
+            <div>
+              <span class="meta-label">Ready</span>
+              <strong>{readyPlayers}/{totalPlayers}</strong>
+            </div>
+            <div>
+              <span class="meta-label">Created</span>
+              <strong>{formatTime(roomView.createdAt)}</strong>
+            </div>
+          {/if}
         </div>
 
         <div class="table-state">
           <p>{roomView.status}</p>
-          <p>{isHost ? 'You are the host.' : me ? 'You are at the table.' : 'Connect to take a seat.'}</p>
+          <p>{tableSubline}</p>
         </div>
+
+        {#if roomView.phase === 'playing'}
+          <section class="board panel-surface">
+            <div class="surface-header">
+              <div>
+                <span class="eyebrow">Shared board</span>
+                <h3>{formatStreetLabel(roomView.street)}</h3>
+              </div>
+              <div class="street-meta">
+                <span>Dealer seat {roomView.dealerSeat === null ? '—' : roomView.dealerSeat + 1}</span>
+                <span>{roomView.communityCards.length}/5 community cards</span>
+              </div>
+            </div>
+
+            <div class="community-cards" role="list" aria-label="Community cards">
+              {#each boardSlots as card, index (index)}
+                <div class={`table-card ${cardTone(card)}`} role="listitem" aria-label={card ? `${cardRank(card)} of ${cardSuitSymbol(card)}` : 'Hidden community card'}>
+                  {#if card}
+                    <span class="card-rank">{cardRank(card)}</span>
+                    <span class="card-suit">{cardSuitSymbol(card)}</span>
+                  {:else}
+                    <span class="card-back" aria-hidden="true">◆</span>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+          </section>
+
+          <section class="private-hand panel-surface">
+            <div class="surface-header">
+              <div>
+                <span class="eyebrow">Your hidden hand</span>
+                <h3>{me ? `${me.name}'s cards` : 'Private cards'}</h3>
+              </div>
+              <div class="street-meta">
+                <span>{holeCards.length > 0 ? 'Only visible to you' : 'Waiting for server sync'}</span>
+              </div>
+            </div>
+
+            {#if holeCards.length > 0}
+              <div class="hole-cards" role="list" aria-label="Your private cards">
+                {#each holeCards as card, index (`${card}-${index}`)}
+                  <div class={`table-card large ${cardTone(card)}`} role="listitem" aria-label={`${cardRank(card)} of ${cardSuitSymbol(card)}`}>
+                    <span class="card-rank">{cardRank(card)}</span>
+                    <span class="card-suit">{cardSuitSymbol(card)}</span>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <div class="private-empty">
+                <p>Your private cards are requested separately from the public room state.</p>
+                <button type="button" class="secondary" onclick={() => requestPrivateState()}>
+                  Sync my cards
+                </button>
+              </div>
+            {/if}
+          </section>
+        {/if}
 
         <ul class="players">
           {#each roomView.players as player (player.id)}
-            <li class={`player-card ${player.connected ? 'connected' : 'away'}`}>
+            <li class={`player-card ${player.connected ? 'connected' : 'away'} ${player.id === mySessionId ? 'self-card' : ''}`}>
               <div class="avatar" aria-hidden="true">{player.name.slice(0, 2).toUpperCase()}</div>
               <div class="player-copy">
                 <div class="player-line">
@@ -428,10 +649,24 @@
                   {#if player.id === roomView.hostId}
                     <span class="host">host</span>
                   {/if}
+                  {#if roomView.phase === 'playing'}
+                    <span class="seat-tag">seat {player.seat + 1}</span>
+                    {#if roomView.dealerSeat === player.seat}
+                      <span class="role-tag dealer">dealer</span>
+                    {/if}
+                    {#if roomView.activeSeat === player.seat}
+                      <span class="role-tag action">action</span>
+                    {/if}
+                  {/if}
                 </div>
                 <p>{playerStatus(player)}</p>
               </div>
-              <div class={`status-dot ${player.connected ? (player.ready ? 'ready' : 'live') : 'away'}`}></div>
+              <div class="status-stack">
+                {#if roomView.phase === 'playing'}
+                  <span class="card-count">{player.holeCardCount}</span>
+                {/if}
+                <div class={`status-dot ${player.connected ? (roomView.phase === 'lobby' ? (player.ready ? 'ready' : 'live') : 'live') : 'away'}`}></div>
+              </div>
             </li>
           {/each}
         </ul>
@@ -488,6 +723,13 @@
     backdrop-filter: blur(14px);
   }
 
+  .panel-surface {
+    border-radius: 22px;
+    border: 1px solid rgba(243, 226, 186, 0.1);
+    background: linear-gradient(180deg, rgba(19, 44, 31, 0.88), rgba(10, 24, 18, 0.92));
+    padding: 1rem;
+  }
+
   .hero {
     padding: 1.5rem 1.5rem 1.35rem;
     max-width: 76rem;
@@ -503,6 +745,7 @@
 
   h1,
   h2,
+  h3,
   strong {
     letter-spacing: 0.01em;
   }
@@ -514,12 +757,17 @@
     text-wrap: balance;
   }
 
-  h2 {
+  h2,
+  h3 {
     margin: 0.2rem 0 0;
     font-size: 1.1rem;
     text-transform: uppercase;
     letter-spacing: 0.14em;
     color: rgba(244, 238, 224, 0.8);
+  }
+
+  h3 {
+    font-size: 0.92rem;
   }
 
   .lede {
@@ -549,7 +797,8 @@
   }
 
   .hero-meta strong,
-  .stats strong {
+  .stats strong,
+  .play-brief strong {
     display: block;
     margin-top: 0.25rem;
     font-size: 1rem;
@@ -558,7 +807,7 @@
 
   .content-grid {
     display: grid;
-    grid-template-columns: minmax(18rem, 1fr) minmax(22rem, 1.2fr);
+    grid-template-columns: minmax(18rem, 1fr) minmax(22rem, 1.25fr);
     gap: 1.25rem;
     max-width: 76rem;
     margin: 0 auto;
@@ -570,12 +819,30 @@
   }
 
   .controls header,
-  .table header {
+  .table header,
+  .surface-header {
     display: flex;
     align-items: start;
     justify-content: space-between;
     gap: 1rem;
+  }
+
+  .controls header,
+  .table header {
     margin-bottom: 1rem;
+  }
+
+  .surface-header {
+    margin-bottom: 0.9rem;
+  }
+
+  .street-meta {
+    display: grid;
+    gap: 0.35rem;
+    justify-items: end;
+    text-align: right;
+    color: rgba(244, 238, 224, 0.68);
+    font-size: 0.82rem;
   }
 
   label {
@@ -664,12 +931,21 @@
     font-size: 0.82rem;
   }
 
+  .play-brief,
   .banner,
   .error {
     margin: 1rem 0 0;
     padding: 0.9rem 1rem;
     border-radius: 16px;
     line-height: 1.5;
+  }
+
+  .play-brief {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    border: 1px solid rgba(143, 208, 155, 0.12);
+    background: linear-gradient(180deg, rgba(38, 72, 51, 0.28), rgba(22, 46, 31, 0.28));
   }
 
   .banner {
@@ -741,6 +1017,86 @@
     color: rgba(244, 238, 224, 0.78);
   }
 
+  .board,
+  .private-hand {
+    margin-bottom: 1rem;
+  }
+
+  .community-cards,
+  .hole-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+    gap: 0.8rem;
+  }
+
+  .table-card {
+    position: relative;
+    min-height: 6.1rem;
+    border-radius: 20px;
+    border: 1px solid rgba(243, 226, 186, 0.14);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 0.9rem 0.85rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  }
+
+  .table-card.large {
+    min-height: 8.2rem;
+  }
+
+  .table-card.dark {
+    color: #0b1712;
+    background: linear-gradient(180deg, #f5efde, #dbcdb2);
+  }
+
+  .table-card.red {
+    color: #7b1f1f;
+    background: linear-gradient(180deg, #f8e6de, #e7c0b8);
+  }
+
+  .table-card.hidden {
+    display: grid;
+    place-items: center;
+    color: rgba(244, 238, 224, 0.4);
+    background:
+      linear-gradient(135deg, rgba(244, 238, 224, 0.06), rgba(244, 238, 224, 0.02)),
+      repeating-linear-gradient(135deg, rgba(244, 238, 224, 0.05), rgba(244, 238, 224, 0.05) 10px, transparent 10px, transparent 20px);
+  }
+
+  .card-rank {
+    font-size: 1.75rem;
+    line-height: 1;
+    font-weight: 800;
+  }
+
+  .card-suit {
+    justify-self: end;
+    align-self: end;
+    font-size: 1.5rem;
+    line-height: 1;
+    font-weight: 700;
+  }
+
+  .card-back {
+    font-size: 1.65rem;
+    line-height: 1;
+    opacity: 0.75;
+  }
+
+  .private-empty {
+    display: grid;
+    gap: 0.8rem;
+    align-items: center;
+    justify-items: start;
+    padding: 0.25rem 0 0.1rem;
+  }
+
+  .private-empty p {
+    margin: 0;
+    color: rgba(244, 238, 224, 0.74);
+  }
+
   .players {
     list-style: none;
     margin: 0;
@@ -762,6 +1118,10 @@
 
   .player-card.connected {
     border-color: rgba(191, 247, 199, 0.14);
+  }
+
+  .player-card.self-card {
+    background: linear-gradient(180deg, rgba(33, 55, 42, 0.72), rgba(11, 20, 15, 0.68));
   }
 
   .player-card.away {
@@ -803,7 +1163,9 @@
   }
 
   .self,
-  .host {
+  .host,
+  .seat-tag,
+  .role-tag {
     border-radius: 999px;
     padding: 0.18rem 0.5rem;
     font-size: 0.68rem;
@@ -820,6 +1182,40 @@
     color: #f6e7ba;
     background: rgba(243, 226, 186, 0.1);
     border: 1px solid rgba(243, 226, 186, 0.14);
+  }
+
+  .seat-tag {
+    color: rgba(244, 238, 224, 0.8);
+    background: rgba(244, 238, 224, 0.06);
+    border: 1px solid rgba(243, 226, 186, 0.1);
+  }
+
+  .role-tag.dealer {
+    color: #06100b;
+    background: #bfe7bf;
+  }
+
+  .role-tag.action {
+    color: #06100b;
+    background: #f4e9bd;
+  }
+
+  .status-stack {
+    display: grid;
+    justify-items: end;
+    gap: 0.45rem;
+  }
+
+  .card-count {
+    min-width: 1.8rem;
+    height: 1.8rem;
+    display: grid;
+    place-items: center;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: #06100b;
+    background: #f4e9bd;
   }
 
   .status-dot {
@@ -863,6 +1259,27 @@
     .hero-grid,
     .content-grid {
       grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 640px) {
+    .play-brief,
+    .stats {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .community-cards,
+    .hole-cards {
+      grid-template-columns: repeat(auto-fit, minmax(4rem, 1fr));
+    }
+
+    .table-card {
+      min-height: 5.4rem;
+      padding: 0.7rem;
+    }
+
+    .table-card.large {
+      min-height: 7rem;
     }
   }
 </style>
