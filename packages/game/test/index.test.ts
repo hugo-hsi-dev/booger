@@ -10,9 +10,10 @@ import {
   restartCampaign,
   setPlayerConfidence,
   setPlayerReady,
+  shuffleDeck,
   startGame,
   startNextHand
-} from '../dist/index.js';
+} from '../src/index.ts';
 
 function createLobbyState() {
   let state = createInitialGameState('room-1', 6);
@@ -22,6 +23,12 @@ function createLobbyState() {
   state = setPlayerReady(state, 'bob', true);
   return state;
 }
+
+test('shuffleDeck uses the provided RNG for deterministic ordering', () => {
+  const shuffled = shuffleDeck(['AS', 'KH', 'QD'], () => 0);
+
+  assert.deepEqual(shuffled, ['KH', 'QD', 'AS']);
+});
 
 test('startGame deals two cards to each player and enters playing phase', () => {
   const state = startGame(createLobbyState(), () => 0.25);
