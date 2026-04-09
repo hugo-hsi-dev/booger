@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onDestroy } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
 
   import {
     createGameClient,
     createRoom,
     getServerEndpoint,
     joinRoom,
+    reconnectRoom,
     ROOM_NAME,
     toRoomView,
     type GameRoomClient,
@@ -18,8 +19,15 @@
     type: 'set-ready' | 'start-game';
     ready?: boolean;
   };
+  type SavedRoomSession = {
+    endpoint: string;
+    playerName: string;
+    roomId: string;
+    reconnectionToken: string;
+  };
 
   const endpoint = getServerEndpoint();
+  const SESSION_STORAGE_KEY = 'booger:lobby-session';
 
   let playerName = $state('Player');
   let roomCode = $state('');
@@ -28,6 +36,7 @@
   let errorMessage = $state('');
   let mySessionId = $state('');
   let roomView = $state<RoomView | null>(null);
+  let isPageUnloading = false;
 
   let client = $state.raw<ReturnType<typeof createGameClient> | null>(null);
   let room = $state.raw<GameRoomClient | null>(null);
@@ -65,19 +74,135 @@
     roomView = toRoomView(state);
   }
 
+  function resetRoomState() {
+    roomView = null;
+    mySessionId = '';
+  }
+
+  function markPageUnloading() {
+    isPageUnloading = true;
+  }
+
+  function readSavedSession(): SavedRoomSession | null {
+    if (typeof sessionStorage === 'undefined') return null;
+
+    const raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!raw) return null;
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<SavedRoomSession>;
+
+      if (
+        typeof parsed.endpoint === 'string' &&
+        typeof parsed.playerName === 'string' &&
+        typeof parsed.roomId === 'string' &&
+        typeof parsed.reconnectionToken === 'string'
+      ) {
+        return parsed as SavedRoomSession;
+      }
+    } catch {
+      // ignore malformed session data
+    }
+
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    return null;
+  }
+
+  function persistSession(nextRoom: GameRoomClient) {
+    if (typeof sessionStorage === 'undefined' || !nextRoom.reconnectionToken) return;
+
+    const savedSession: SavedRoomSession = {
+      endpoint,
+      playerName: playerName.trim() || 'Player',
+      roomId: nextRoom.roomId,
+      reconnectionToken: nextRoom.reconnectionToken
+    };
+
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(savedSession));
+  }
+
+  function clearSavedSession() {
+    if (typeof sessionStorage === 'undefined') return;
+    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  }
+
+  async function releaseRoom(consented: boolean) {
+    if (!room) return;
+
+    const existingRoom = room;
+    room = null;
+    existingRoom.removeAllListeners();
+    await existingRoom.leave(consented).catch(() => undefined);
+  }
+
+  function bindRoom(nextRoom: GameRoomClient, nextBanner: string) {
+    room = nextRoom;
+    mySessionId = nextRoom.sessionId;
+    setSnapshot(nextRoom.state);
+    banner = nextBanner;
+    roomCode = nextRoom.roomId;
+    connectionState = 'connected';
+    isPageUnloading = false;
+    persistSession(nextRoom);
+
+    nextRoom.onStateChange((state) => {
+      setSnapshot(state);
+      persistSession(nextRoom);
+    });
+
+    nextRoom.onError((code, message) => {
+      connectionState = 'error';
+      errorMessage = message ?? `Room error ${code}`;
+      banner = 'Connection issue';
+    });
+
+    nextRoom.onLeave((_code, reason) => {
+      connectionState = 'idle';
+      errorMessage = '';
+      banner = reason ? `Left room: ${reason}` : 'Left room';
+      resetRoomState();
+      room = null;
+
+      if (!isPageUnloading) {
+        clearSavedSession();
+      }
+    });
+  }
+
+  async function reconnectSavedSession(savedSession: SavedRoomSession) {
+    if (connectionState === 'connecting') return;
+
+    playerName = savedSession.playerName;
+    roomCode = savedSession.roomId;
+    errorMessage = '';
+    banner = `Reconnecting to ${savedSession.roomId}…`;
+    connectionState = 'connecting';
+    resetRoomState();
+
+    try {
+      const nextRoom = await reconnectRoom(ensureClient(), savedSession.reconnectionToken);
+      bindRoom(nextRoom, `Reconnected to room: ${nextRoom.roomId}`);
+    } catch (error) {
+      connectionState = 'error';
+      banner = 'Reconnect expired';
+      clearSavedSession();
+      resetRoomState();
+      room = null;
+      errorMessage = error instanceof Error ? error.message : 'Could not reconnect to the room';
+    }
+  }
+
   async function connect(mode: 'create' | 'join') {
     if (connectionState === 'connecting') return;
 
     errorMessage = '';
     banner = mode === 'create' ? 'Creating room…' : 'Joining room…';
     connectionState = 'connecting';
+    isPageUnloading = false;
+    clearSavedSession();
 
-    if (room) {
-      const existingRoom = room;
-      room = null;
-      existingRoom.removeAllListeners();
-      await existingRoom.leave().catch(() => undefined);
-    }
+    await releaseRoom(true);
+    resetRoomState();
 
     try {
       const roomName = playerName.trim() || 'Player';
@@ -86,36 +211,15 @@
           ? await createRoom(ensureClient(), ROOM_NAME, { name: roomName })
           : await joinRoom(ensureClient(), roomCode.trim(), { name: roomName });
 
-      room = nextRoom;
-      mySessionId = nextRoom.sessionId;
-      setSnapshot(nextRoom.state);
-      banner = mode === 'create' ? `Room created: ${nextRoom.roomId}` : `Joined room: ${nextRoom.roomId}`;
-      roomCode = nextRoom.roomId;
-      connectionState = 'connected';
-
-      nextRoom.onStateChange((state) => {
-        setSnapshot(state);
-      });
-
-      nextRoom.onError((code, message) => {
-        connectionState = 'error';
-        errorMessage = message ?? `Room error ${code}`;
-        banner = 'Connection issue';
-      });
-
-      nextRoom.onLeave((code, reason) => {
-        connectionState = 'idle';
-        errorMessage = '';
-        banner = reason ? `Left room: ${reason}` : 'Left room';
-        roomView = null;
-        mySessionId = '';
-        room = null;
-      });
+      bindRoom(
+        nextRoom,
+        mode === 'create' ? `Room created: ${nextRoom.roomId}` : `Joined room: ${nextRoom.roomId}`
+      );
     } catch (error) {
       connectionState = 'error';
       banner = 'Failed to connect';
-      roomView = null;
-      mySessionId = '';
+      resetRoomState();
+      room = null;
       errorMessage = error instanceof Error ? error.message : 'Could not connect to the room';
     }
   }
@@ -123,6 +227,8 @@
   async function disconnect() {
     if (!room) return;
 
+    isPageUnloading = false;
+    clearSavedSession();
     banner = 'Disconnecting…';
     await room.leave().catch(() => undefined);
   }
@@ -159,8 +265,24 @@
     return player.ready ? 'Ready' : 'Waiting';
   }
 
+  onMount(() => {
+    const savedSession = readSavedSession();
+
+    if (!savedSession) {
+      return;
+    }
+
+    if (savedSession.endpoint !== endpoint) {
+      clearSavedSession();
+      return;
+    }
+
+    void reconnectSavedSession(savedSession);
+  });
+
   onDestroy(() => {
-    void room?.leave().catch(() => undefined);
+    markPageUnloading();
+    void room?.leave(false).catch(() => undefined);
   });
 </script>
 
@@ -171,6 +293,8 @@
     content="A digital tabletop for The Gang, with realtime lobby sync and server-authoritative game state."
   />
 </svelte:head>
+
+<svelte:window onbeforeunload={markPageUnloading} onpagehide={markPageUnloading} />
 
 <main class="shell">
   <div class="backdrop" aria-hidden="true"></div>

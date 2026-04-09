@@ -1,5 +1,5 @@
 import { Client, type Room } from './colyseus-client.js';
-import { GameStateSchema } from './room-schema.js';
+import { GameStateSchema } from './room-schema';
 
 export type RoomPhase = 'lobby' | 'playing' | 'finished';
 
@@ -53,6 +53,27 @@ export async function joinRoom(client: Client, roomId: string, options: JoinOpti
   });
 
   return client.consumeSeatReservation(normalizeSeatReservation(response.data) as any, GameStateSchema);
+}
+
+export async function reconnectRoom(client: Client, reconnectionToken: string) {
+  const [roomId, token] = reconnectionToken.split(':');
+
+  if (!roomId || !token) {
+    throw new Error('Invalid reconnection token');
+  }
+
+  const response = await client.http.post<SeatReservation>(`matchmake/reconnect/${roomId}`, {
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ reconnectionToken: token })
+  });
+
+  return client.consumeSeatReservation(
+    normalizeSeatReservation({ ...response.data, reconnectionToken: token }) as any,
+    GameStateSchema
+  );
 }
 
 export function toRoomView(state: GameStateSnapshot): RoomView {

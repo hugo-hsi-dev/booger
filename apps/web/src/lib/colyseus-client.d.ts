@@ -13,6 +13,7 @@ export type SeatReservation = {
 export type Room<State = any> = {
   roomId: string;
   sessionId: string;
+  reconnectionToken?: string;
   name: string;
   state: State;
   send<T = any>(type: string | number, message?: T): void;
