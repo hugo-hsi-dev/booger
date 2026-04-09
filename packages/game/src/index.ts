@@ -1,3 +1,5 @@
+import { randomInt } from 'node:crypto';
+
 export type GamePhase = 'lobby' | 'playing' | 'finished';
 export type GameOutcome = 'pending' | 'success' | 'failure';
 export type CampaignStatus = 'ongoing' | 'won' | 'lost';
@@ -207,6 +209,10 @@ function removePrivateHand(privateHands: Record<string, CardCode[]>, playerId: s
   return Object.fromEntries(
     Object.entries(privateHands).filter(([id]) => id !== playerId)
   ) as Record<string, CardCode[]>;
+}
+
+function secureRandom() {
+  return randomInt(0x100000000) / 0x100000000;
 }
 
 function drawCards(deck: CardCode[], count: number) {
@@ -467,7 +473,7 @@ export function createDeck(): CardCode[] {
   return deck;
 }
 
-export function shuffleDeck(cards: readonly CardCode[], rng: GameRng = Math.random) {
+export function shuffleDeck(cards: readonly CardCode[], rng: GameRng = secureRandom) {
   const shuffled = [...cards];
 
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
@@ -623,7 +629,7 @@ export function canStartGame(state: GameState) {
   );
 }
 
-export function startGame(state: GameState, rng: GameRng = Math.random): GameState {
+export function startGame(state: GameState, rng: GameRng = secureRandom): GameState {
   if (!canStartGame(state)) {
     throw new Error('Game cannot start yet');
   }
@@ -764,7 +770,7 @@ export function canStartNextHand(state: GameState) {
   );
 }
 
-export function startNextHand(state: GameState, rng: GameRng = Math.random): GameState {
+export function startNextHand(state: GameState, rng: GameRng = secureRandom): GameState {
   if (!canStartNextHand(state)) {
     throw new Error('Next hand cannot start yet');
   }
