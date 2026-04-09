@@ -155,6 +155,7 @@ type SeatReservation = {
   name: string;
   roomId: string;
   processId: string;
+  publicAddress?: string;
   sessionId: string;
   protocol?: string;
   reconnectionToken?: string;
@@ -179,7 +180,8 @@ function normalizeSeatReservation(response: SeatReservation): SeatReservationEnv
     room: {
       name: response.name,
       roomId: response.roomId,
-      processId: response.processId
+      processId: response.processId,
+      publicAddress: response.publicAddress
     },
     sessionId: response.sessionId,
     protocol: response.protocol ?? 'ws',
