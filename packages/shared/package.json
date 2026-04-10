@@ -7,10 +7,12 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
     }
   },
   "scripts": {
+    "dev": "tsup src/index.ts --format esm --dts --clean --out-dir dist --watch",
     "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist",
     "check": "tsc -p tsconfig.json --noEmit"
   },
@@ -20,6 +22,8 @@
     "typescript": "^5.9.3"
   },
   "dependencies": {
-    "@colyseus/schema": "^4.0.19"
+    "@booger/game": "workspace:*",
+    "@colyseus/schema": "^4.0.19",
+    "zod": "^4.3.6"
   }
 }

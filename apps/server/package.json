@@ -3,9 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --tsconfig tsconfig.dev.json src/index.ts",
     "build": "tsup src/index.ts --format esm --dts --clean --out-dir dist",
-    "check": "tsc -p tsconfig.json --noEmit"
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --tsconfig tsconfig.test.json --test test/**/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^25.5.2",
