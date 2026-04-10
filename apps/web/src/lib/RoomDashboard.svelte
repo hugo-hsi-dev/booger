@@ -45,6 +45,7 @@
   };
 
   const endpoint = getServerEndpoint();
+  const endpointLabel = endpoint || 'Auto-detected in browser';
   const SESSION_STORAGE_KEY = 'booger:lobby-session';
   const SUIT_SYMBOLS: Record<CardSuit, string> = {
     S: '♠',
@@ -541,7 +542,7 @@
       <div class="hero-meta">
         <div>
           <span class="meta-label">Server</span>
-          <strong>{endpoint}</strong>
+          <strong>{endpointLabel}</strong>
         </div>
         <div>
           <span class="meta-label">Room</span>

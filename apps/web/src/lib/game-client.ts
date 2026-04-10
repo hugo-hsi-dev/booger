@@ -1,3 +1,5 @@
+import { browser } from '$app/environment';
+
 import { Client, type Room } from './colyseus-client.js';
 import { GameStateSchema } from '@booger/shared';
 
@@ -145,7 +147,22 @@ function toPlayerView(player: PlayerView): PlayerView {
 }
 
 export function getServerEndpoint() {
-  return import.meta.env.VITE_COLYSEUS_URL ?? 'ws://localhost:2567';
+  const configured = import.meta.env.VITE_COLYSEUS_URL;
+
+  if (configured) {
+    return configured;
+  }
+
+  if (import.meta.env.DEV) {
+    return 'ws://localhost:2567';
+  }
+
+  if (browser) {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}`;
+  }
+
+  return '';
 }
 
 export type GameRoomClient = Room<GameStateSnapshot>;
