@@ -18,27 +18,14 @@ import {
   type GameState,
   type TableStreet
 } from '@booger/game';
-import { createRoomState, syncRoomState, GameStateSchema } from '@booger/shared';
-
-interface LobbyJoinOptions {
-  name?: string;
-}
-
-interface LobbyActionMessage {
-  type: 'set-ready' | 'start-game';
-  ready?: boolean;
-}
-
-interface TableActionMessage {
-  type:
-    | 'advance-street'
-    | 'resolve-showdown'
-    | 'restart-run'
-    | 'set-confidence'
-    | 'next-hand'
-    | 'sync-private-state';
-  confidenceRank?: number | null;
-}
+import {
+  createRoomState,
+  LobbyActionMessageSchema,
+  normalizeLobbyJoinOptions,
+  syncRoomState,
+  TableActionMessageSchema,
+  GameStateSchema
+} from '@booger/shared';
 
 interface PrivateStateMessage {
   holeCards: CardCode[];
@@ -63,19 +50,23 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
     this.setState(createRoomState(this.gameState));
     void this.updateRoomAccess();
 
-    this.onMessage<LobbyActionMessage>('lobby-action', (client, message) => {
+    this.onMessage('lobby-action', (client, message) => {
       this.handleLobbyAction(client, message);
     });
 
-    this.onMessage<TableActionMessage>('table-action', (client, message) => {
+    this.onMessage('table-action', (client, message) => {
       this.handleTableAction(client, message);
     });
   }
 
-  onJoin(client: Client, options: LobbyJoinOptions = {}) {
+  onJoin(client: Client, options: unknown = {}) {
+    const normalizedOptions = normalizeLobbyJoinOptions(options);
+
     this.gameState = addPlayer(this.gameState, {
       id: client.sessionId,
-      name: options.name ?? `Player ${this.gameState.players.length + 1}`,
+      name:
+        normalizedOptions.name ??
+        `Player ${this.gameState.players.length + 1}`,
       connected: true
     });
 
@@ -106,46 +97,64 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
     return client.sessionId === this.gameState.hostId;
   }
 
-  private handleLobbyAction(client: Client, message: LobbyActionMessage) {
-    if (message.type === 'set-ready') {
-      this.applyAction(client, 'set-ready', () => {
-        this.gameState = setPlayerReady(
-          this.gameState,
-          client.sessionId,
-          Boolean(message.ready)
-        );
-      });
+  private handleLobbyAction(client: Client, rawMessage: unknown) {
+    const parsed = LobbyActionMessageSchema.safeParse(rawMessage);
+
+    if (!parsed.success) {
+      this.sendActionError(client, 'lobby-action', 'Invalid lobby action payload');
       return;
     }
 
-    if (message.type === 'start-game') {
-      if (!this.isHost(client)) {
-        this.sendActionError(client, 'start-game', 'Host only action', ACTION_ERROR_CODES.FORBIDDEN);
-        return;
-      }
+    const lobbyMessage = parsed.data;
 
-      this.applyAction(client, 'start-game', () => {
-        this.gameState = startGame(this.gameState);
-        this.sendPrivateStateToAll();
-      });
+    switch (lobbyMessage.type) {
+      case 'set-ready':
+        this.applyAction(client, 'set-ready', () => {
+          this.gameState = setPlayerReady(
+            this.gameState,
+            client.sessionId,
+            Boolean(lobbyMessage.ready)
+          );
+        });
+        return;
+      case 'start-game':
+        if (!this.isHost(client)) {
+          this.sendActionError(client, 'start-game', 'Host only action', ACTION_ERROR_CODES.FORBIDDEN);
+          return;
+        }
+
+        this.applyAction(client, 'start-game', () => {
+          this.gameState = startGame(this.gameState);
+          this.sendPrivateStateToAll();
+        });
     }
   }
 
-  private handleTableAction(client: Client, message: TableActionMessage) {
-    if (message.type === 'sync-private-state') {
-      this.sendPrivateState(client);
+  private handleTableAction(client: Client, rawMessage: unknown) {
+    const parsed = TableActionMessageSchema.safeParse(rawMessage);
+
+    if (!parsed.success) {
+      this.sendActionError(client, 'table-action', 'Invalid table action payload');
       return;
     }
 
-    if (message.type === 'set-confidence') {
-      this.applyAction(client, 'set-confidence', () => {
-        this.gameState = setPlayerConfidence(
-          this.gameState,
-          client.sessionId,
-          message.confidenceRank ?? null
-        );
-      });
-      return;
+    const tableMessage = parsed.data;
+
+    switch (tableMessage.type) {
+      case 'sync-private-state':
+        this.sendPrivateState(client);
+        return;
+      case 'set-confidence':
+        this.applyAction(client, 'set-confidence', () => {
+          this.gameState = setPlayerConfidence(
+            this.gameState,
+            client.sessionId,
+            tableMessage.confidenceRank ?? null
+          );
+        });
+        return;
+      default:
+        break;
     }
 
     if (!this.isHost(client)) {
@@ -153,36 +162,31 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
       return;
     }
 
-    if (message.type === 'advance-street') {
-      this.applyAction(client, 'advance-street', () => {
-        this.gameState = advanceStreet(this.gameState);
-      });
-      return;
-    }
+    switch (tableMessage.type) {
+      case 'advance-street':
+        this.applyAction(client, 'advance-street', () => {
+          this.gameState = advanceStreet(this.gameState);
+        });
+        return;
+      case 'resolve-showdown':
+        this.applyAction(client, 'resolve-showdown', () => {
+          if (!canResolveShowdown(this.gameState)) {
+            throw new Error('Showdown cannot be resolved yet');
+          }
 
-    if (message.type === 'resolve-showdown') {
-      this.applyAction(client, 'resolve-showdown', () => {
-        if (!canResolveShowdown(this.gameState)) {
-          throw new Error('Showdown cannot be resolved yet');
-        }
-
-        this.gameState = resolveShowdown(this.gameState);
-      });
-      return;
-    }
-
-    if (message.type === 'next-hand') {
-      this.applyAction(client, 'next-hand', () => {
-        this.gameState = startNextHand(this.gameState);
-        this.sendPrivateStateToAll();
-      });
-      return;
-    }
-
-    if (message.type === 'restart-run') {
-      this.applyAction(client, 'restart-run', () => {
-        this.gameState = restartCampaign(this.gameState);
-      });
+          this.gameState = resolveShowdown(this.gameState);
+        });
+        return;
+      case 'next-hand':
+        this.applyAction(client, 'next-hand', () => {
+          this.gameState = startNextHand(this.gameState);
+          this.sendPrivateStateToAll();
+        });
+        return;
+      case 'restart-run':
+        this.applyAction(client, 'restart-run', () => {
+          this.gameState = restartCampaign(this.gameState);
+        });
     }
   }
 

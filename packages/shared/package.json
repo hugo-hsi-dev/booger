@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@booger/game": "workspace:*",
-    "@colyseus/schema": "^4.0.19"
+    "@colyseus/schema": "^4.0.19",
+    "zod": "^4.3.6"
   }
 }
