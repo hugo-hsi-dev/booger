@@ -28,12 +28,11 @@
   );
 
   $effect(() => {
-    if (!roomId || session.roomView || session.connectionState === 'connecting') {
+    if (!roomId) {
       return;
     }
 
-    session.setRoomCode(roomId);
-    void session.joinRoomFromRoute(roomId);
+    session.ensureJoinedRoom(roomId);
   });
 
   async function switchRoom() {
@@ -79,7 +78,7 @@
       <div>
         <h1>{roomId ?? 'Lobby'}</h1>
         <p class="lede">
-          Get the table ready, make sure everyone is present, then mark ready to begin the hand.
+          Get the table ready, make sure everyone is present, then mark ready. The hand begins automatically once everyone is ready.
         </p>
       </div>
 
@@ -145,9 +144,6 @@
         <div class="button-row compact">
           <button type="button" class="ghost" onclick={() => void session.toggleReady()} disabled={!session.roomView || !session.me}>
             {session.me?.ready ? 'Mark unready' : 'Mark ready'}
-          </button>
-          <button type="button" class="ghost" onclick={() => void session.startGame()} disabled={!session.canStart}>
-            Start game
           </button>
         </div>
 

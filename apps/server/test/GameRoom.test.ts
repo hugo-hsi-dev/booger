@@ -121,7 +121,7 @@ test('GameRoom normalizes join names and rejects malformed action payloads', asy
   assert.equal(access.gameState.players[0]?.name, 'Alice');
 
   const guest = createClient('guest');
-  access.handleLobbyAction(guest, { type: 'start-game', ready: true } as any);
+  access.handleLobbyAction(guest, { type: 'set-ready', name: 'nope' } as any);
   access.handleTableAction(guest, { type: 'set-confidence', confidenceRank: 'nope' } as any);
 
   assert.deepEqual(guest.errors[0], {

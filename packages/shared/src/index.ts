@@ -47,8 +47,7 @@ export class GameStateSchema extends Schema {
   @type(['string']) communityCards = new ArraySchema<CardCode>();
 }
 
-function toPlayerSchema(player: GamePlayer) {
-  const schema = new PlayerSchema();
+function syncPlayerSchema(schema: PlayerSchema, player: GamePlayer) {
   schema.id = player.id;
   schema.name = player.name;
   schema.connected = player.connected;
@@ -58,7 +57,42 @@ function toPlayerSchema(player: GamePlayer) {
   schema.confidenceRank = player.confidenceRank ?? -1;
   schema.actualRank = player.actualRank ?? -1;
   schema.handLabel = player.handLabel ?? '';
+}
+
+function toPlayerSchema(player: GamePlayer) {
+  const schema = new PlayerSchema();
+  syncPlayerSchema(schema, player);
   return schema;
+}
+
+function syncPlayerArray(players: GameState['players'], target: GameStateSchema['players']) {
+  while (target.length > players.length) {
+    target.pop();
+  }
+
+  players.forEach((player, index) => {
+    const current = target[index];
+
+    if (current) {
+      syncPlayerSchema(current, player);
+    } else {
+      target.push(toPlayerSchema(player));
+    }
+  });
+}
+
+function syncCardArray(cards: GameState['communityCards'], target: GameStateSchema['communityCards']) {
+  while (target.length > cards.length) {
+    target.pop();
+  }
+
+  cards.forEach((card, index) => {
+    if (target[index] === undefined) {
+      target.push(card);
+    } else if (target[index] !== card) {
+      target[index] = card;
+    }
+  });
 }
 
 export function createRoomState(state: GameState): GameStateSchema {
@@ -86,12 +120,6 @@ export function syncRoomState(roomState: GameStateSchema, state: GameState) {
   roomState.street = state.street;
   roomState.dealerSeat = state.dealerSeat ?? -1;
   roomState.activeSeat = state.activeSeat ?? -1;
-  roomState.players.clear();
-  for (const player of state.players) {
-    roomState.players.push(toPlayerSchema(player));
-  }
-  roomState.communityCards.clear();
-  for (const card of state.communityCards) {
-    roomState.communityCards.push(card);
-  }
+  syncPlayerArray(state.players, roomState.players);
+  syncCardArray(state.communityCards, roomState.communityCards);
 }
