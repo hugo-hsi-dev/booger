@@ -318,6 +318,8 @@ export class RoomSession {
       return;
     }
 
+    this.applyOptimisticConfidenceRank(confidenceRank);
+    this.banner = `Claimed confidence slot #${confidenceRank}`;
     this.sendTableAction({ type: 'set-confidence', confidenceRank });
   }
 
@@ -326,6 +328,8 @@ export class RoomSession {
       return;
     }
 
+    this.applyOptimisticConfidenceRank(null);
+    this.banner = 'Confidence slot cleared';
     this.sendTableAction({ type: 'set-confidence', confidenceRank: null });
   }
 
@@ -445,6 +449,23 @@ export class RoomSession {
       | { type: 'sync-private-state' }
   ) {
     this.room?.send(TABLE_ACTION_MESSAGE, action);
+  }
+
+  private applyOptimisticConfidenceRank(confidenceRank: number | null) {
+    if (!this.roomView || !this.mySessionId) {
+      return;
+    }
+
+    this.roomView = {
+      ...this.roomView,
+      players: this.roomView.players.map((player) =>
+        player.id === this.mySessionId
+          ? { ...player, confidenceRank }
+          : confidenceRank !== null && player.confidenceRank === confidenceRank
+            ? { ...player, confidenceRank: null }
+            : player
+      )
+    };
   }
 
   private setSnapshot(state: RoomView) {

@@ -244,6 +244,23 @@ test('GameRoom sends private state only to the requested client', async () => {
   ]);
 });
 
+test('GameRoom lets players claim confidence slots while playing', async () => {
+  const room = new TestGameRoom();
+  room.onCreate();
+  await flushMicrotasks();
+
+  const access = room as unknown as GameRoomAccess;
+  access.gameState = createPlayingState();
+  access.syncState();
+  await flushMicrotasks();
+
+  const bob = createClient('bob');
+  access.handleTableAction(bob, { type: 'set-confidence', confidenceRank: 2 });
+
+  const updatedBob = access.gameState.players.find((player) => player.id === 'bob');
+  assert.equal(updatedBob?.confidenceRank, 2);
+});
+
 test('GameRoom reconnects a dropped player without leaking another player private state', async () => {
   const room = new TestGameRoom();
   room.onCreate();
