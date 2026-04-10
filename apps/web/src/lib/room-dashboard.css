@@ -695,6 +695,58 @@ html {
     margin: 0;
   }
 
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 42rem;
+  }
+
+  .home-entry {
+    max-width: 42rem;
+    justify-self: center;
+  }
+
+  .home-note {
+    margin: 1rem 0 0;
+    line-height: 1.6;
+    color: rgba(244, 238, 224, 0.72);
+  }
+
+  .room-grid {
+    align-items: start;
+  }
+
+  .switch-card {
+    display: grid;
+    gap: 1rem;
+    align-items: start;
+    max-width: 50rem;
+    margin: 0 auto;
+    padding: 1.25rem;
+  }
+
+  .switch-card p {
+    margin: 0.5rem 0 0;
+    line-height: 1.6;
+    color: rgba(244, 238, 224, 0.76);
+  }
+
+  .mini-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+    padding: 1rem;
+    border-radius: 18px;
+    background: rgba(244, 238, 224, 0.04);
+    border: 1px solid rgba(243, 226, 186, 0.1);
+  }
+
+  .mini-summary strong {
+    display: block;
+    margin-top: 0.25rem;
+    word-break: break-word;
+  }
+
   @media (max-width: 900px) {
     .shell {
       padding: 1rem;

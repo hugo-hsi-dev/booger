@@ -12,6 +12,7 @@ import {
   restartCampaign,
   setPlayerConfidence,
   setPlayerConnected,
+  setPlayerName,
   setPlayerReady,
   startGame,
   startNextHand,
@@ -122,6 +123,18 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
             this.sendPrivateStateToAll();
           }
         });
+        return;
+      case 'set-name':
+        this.applyAction(client, 'set-name', () => {
+          this.gameState = setPlayerName(
+            this.gameState,
+            client.sessionId,
+            lobbyMessage.name
+          );
+        });
+        return;
+      default:
+        break;
     }
   }
 

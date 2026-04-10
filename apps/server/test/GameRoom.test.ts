@@ -26,7 +26,10 @@ type TestClient = Client & {
 type GameRoomAccess = {
   gameState: GameState;
   syncState(): void;
-  handleLobbyAction(client: Client, message: { type: 'set-ready'; ready?: boolean }): void;
+  handleLobbyAction(
+    client: Client,
+    message: { type: 'set-ready'; ready?: boolean } | { type: 'set-name'; name: string }
+  ): void;
   handleTableAction(
     client: Client,
     message:
@@ -131,6 +134,21 @@ test('GameRoom normalizes join names and rejects malformed action payloads', asy
   });
 });
 
+test('GameRoom lets lobby players rename themselves before the game starts', async () => {
+  const room = new TestGameRoom();
+  room.onCreate();
+  await flushMicrotasks();
+
+  const host = createClient('host');
+  room.onJoin(host, { name: 'Host' });
+  await flushMicrotasks();
+
+  const access = room as unknown as GameRoomAccess;
+  access.handleLobbyAction(host, { type: 'set-name', name: '  Renamed Host  ' });
+
+  assert.equal(access.gameState.players[0]?.name, 'Renamed Host');
+});
+
 test('GameRoom rejects unauthorized table actions with typed errors', async () => {
   const room = new TestGameRoom();
   room.onCreate();
@@ -224,6 +242,23 @@ test('GameRoom sends private state only to the requested client', async () => {
       }
     }
   ]);
+});
+
+test('GameRoom lets players claim confidence slots while playing', async () => {
+  const room = new TestGameRoom();
+  room.onCreate();
+  await flushMicrotasks();
+
+  const access = room as unknown as GameRoomAccess;
+  access.gameState = createPlayingState();
+  access.syncState();
+  await flushMicrotasks();
+
+  const bob = createClient('bob');
+  access.handleTableAction(bob, { type: 'set-confidence', confidenceRank: 2 });
+
+  const updatedBob = access.gameState.players.find((player) => player.id === 'bob');
+  assert.equal(updatedBob?.confidenceRank, 2);
 });
 
 test('GameRoom reconnects a dropped player without leaking another player private state', async () => {

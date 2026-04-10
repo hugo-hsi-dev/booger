@@ -14,6 +14,7 @@ import {
   restartCampaign,
   setPlayerConfidence,
   setPlayerConnected,
+  setPlayerName,
   setPlayerReady,
   startGame,
   startNextHand,
@@ -58,6 +59,19 @@ test('addPlayer assigns the first host and enforces max players', () => {
 
   assert.equal(state.hostId, 'alice');
   assert.throws(() => addPlayer(state, { id: 'carol', name: 'Carol', connected: true }), /Room is full/);
+});
+
+test('setPlayerName trims and only works in the lobby', () => {
+  let state = createLobbyState(['alice', 'bob']);
+
+  state = setPlayerName(state, 'alice', '  Captain Alice  ');
+
+  const alice = state.players.find((player) => player.id === 'alice');
+  assert.equal(alice?.name, 'Captain Alice');
+  assert.throws(() => setPlayerName(state, 'alice', '   '), /Name cannot be empty/);
+
+  const started = startGame(createReadyLobbyState(), () => 0.2);
+  assert.throws(() => setPlayerName(started, 'alice', 'Renamed'), /Names can only be changed in the lobby/);
 });
 
 test('addPlayer rejects joins once a game is in progress', () => {

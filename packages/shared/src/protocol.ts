@@ -21,6 +21,12 @@ export const LobbyActionMessageSchema = z.discriminatedUnion('type', [
       ready: z.boolean().optional()
     })
     .strict(),
+  z
+    .object({
+      type: z.literal('set-name'),
+      name: z.string().trim().min(1).max(24)
+    })
+    .strict(),
   z.object({ type: z.literal('start-game') }).strict()
 ]);
 
