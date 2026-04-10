@@ -17,6 +17,18 @@
     session.init();
   });
 
+  function syncRoute(path: string, target: string) {
+    if (path === target) {
+      return;
+    }
+
+    void goto(target, {
+      replaceState: true,
+      noScroll: true,
+      keepFocus: true
+    });
+  }
+
   $effect(() => {
     const room = session.roomView;
     const path = page.url.pathname;
@@ -30,17 +42,17 @@
     const gamePath = `${roomRoot}/game`;
 
     if (path === '/') {
-      void goto(room.phase === 'playing' ? gamePath : roomRoot);
+      syncRoute(path, room.phase === 'playing' ? gamePath : roomRoot);
       return;
     }
 
     if (path === roomRoot && room.phase === 'playing') {
-      void goto(gamePath);
+      syncRoute(path, gamePath);
       return;
     }
 
     if (path === gamePath && room.phase === 'lobby') {
-      void goto(roomRoot);
+      syncRoute(path, roomRoot);
     }
   });
 </script>
