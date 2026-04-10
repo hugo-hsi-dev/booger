@@ -16,6 +16,7 @@ import {
 
 const ROOM_SESSION_KEY = 'booger:lobby-session';
 const PLAYER_NAME_KEY = 'booger:player-name';
+const CONSENTED_CLOSE_CODE = 4000;
 
 export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 
@@ -88,16 +89,6 @@ export class RoomSession {
 
   get confidenceSlots() {
     return Array.from({ length: this.totalPlayers }, (_, index) => index + 1);
-  }
-
-  get canStart() {
-    return Boolean(
-      this.roomView &&
-        this.roomView.phase === 'lobby' &&
-        this.isHost &&
-        this.roomView.players.length >= 2 &&
-        this.roomView.players.every((player) => player.connected && player.ready)
-    );
   }
 
   get canAdvanceStreet() {
@@ -233,6 +224,18 @@ export class RoomSession {
     return this.connect('join', roomId);
   }
 
+  ensureJoinedRoom(roomId: string) {
+    if (!roomId || this.connectionState === 'connecting') {
+      return;
+    }
+
+    this.setRoomCode(roomId);
+
+    if (!this.roomView) {
+      void this.joinRoomFromRoute(roomId);
+    }
+  }
+
   async switchRoom(roomId: string) {
     await this.disconnect();
     return this.connect('join', roomId);
@@ -272,10 +275,6 @@ export class RoomSession {
     }
 
     this.sendLobbyAction({ type: 'set-ready', ready: !(this.me?.ready ?? false) });
-  }
-
-  startGame() {
-    this.sendLobbyAction({ type: 'start-game' });
   }
 
   renamePlayer(name: string) {
@@ -393,12 +392,24 @@ export class RoomSession {
       this.banner = 'Connection issue';
     });
 
-    nextRoom.onLeave((_code, reason) => {
+    nextRoom.onLeave((code, reason) => {
+      const savedSession = this.toSavedSession(nextRoom);
+      const canReconnect =
+        !this.isPageUnloading &&
+        code !== CONSENTED_CLOSE_CODE &&
+        savedSession !== null;
+
+      this.resetRoomState();
+      this.room = null;
+
+      if (canReconnect && savedSession) {
+        void this.reconnectSavedSession(savedSession);
+        return;
+      }
+
       this.connectionState = 'idle';
       this.errorMessage = '';
       this.banner = reason ? `Left room: ${reason}` : 'Left room';
-      this.resetRoomState();
-      this.room = null;
 
       if (!this.isPageUnloading) {
         this.clearSavedSession();
@@ -435,7 +446,7 @@ export class RoomSession {
     }
   }
 
-  private sendLobbyAction(action: { type: 'set-ready'; ready?: boolean } | { type: 'set-name'; name: string } | { type: 'start-game' }) {
+  private sendLobbyAction(action: { type: 'set-ready'; ready?: boolean } | { type: 'set-name'; name: string }) {
     this.room?.send('lobby-action', action);
   }
 
@@ -505,16 +516,25 @@ export class RoomSession {
   }
 
   private persistSession(nextRoom: GameRoomClient) {
-    if (!browser || !nextRoom.reconnectionToken) return;
+    if (!browser) return;
 
-    const savedSession: SavedSession = {
+    const savedSession = this.toSavedSession(nextRoom);
+    if (!savedSession) return;
+
+    sessionStorage.setItem(ROOM_SESSION_KEY, JSON.stringify(savedSession));
+  }
+
+  private toSavedSession(nextRoom: GameRoomClient): SavedSession | null {
+    if (!nextRoom.reconnectionToken) {
+      return null;
+    }
+
+    return {
       endpoint: this.endpoint,
       playerName: this.playerName.trim() || 'Player',
       roomId: nextRoom.roomId,
       reconnectionToken: nextRoom.reconnectionToken
     };
-
-    sessionStorage.setItem(ROOM_SESSION_KEY, JSON.stringify(savedSession));
   }
 
   private clearSavedSession() {
