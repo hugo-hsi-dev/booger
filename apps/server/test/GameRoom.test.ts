@@ -106,6 +106,31 @@ function createPlayingState() {
   };
 }
 
+test('GameRoom normalizes join names and rejects malformed action payloads', async () => {
+  const room = new TestGameRoom();
+  room.onCreate();
+  await flushMicrotasks();
+
+  const access = room as unknown as GameRoomAccess;
+  const player = createClient('player');
+  room.onJoin(player, { name: '   Alice   ' });
+
+  assert.equal(access.gameState.players[0]?.name, 'Alice');
+
+  const guest = createClient('guest');
+  access.handleLobbyAction(guest, { type: 'start-game', ready: true } as any);
+  access.handleTableAction(guest, { type: 'set-confidence', confidenceRank: 'nope' } as any);
+
+  assert.deepEqual(guest.errors[0], {
+    code: 4400,
+    message: 'lobby-action: Invalid lobby action payload'
+  });
+  assert.deepEqual(guest.errors[1], {
+    code: 4400,
+    message: 'table-action: Invalid table action payload'
+  });
+});
+
 test('GameRoom rejects non-host lobby and table actions with typed errors', async () => {
   const room = new TestGameRoom();
   room.onCreate();

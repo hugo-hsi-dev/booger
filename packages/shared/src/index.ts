@@ -1,3 +1,5 @@
+export * from './protocol.js';
+
 import { ArraySchema, Schema, type } from '@colyseus/schema';
 
 import type {
