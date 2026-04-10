@@ -29,12 +29,11 @@ export class RoomSession {
   banner = $state('Create a room or join with a code.');
   errorMessage = $state('');
   mySessionId = $state('');
-  roomView = $state<RoomView | null>(null);
-  privateState = $state<PrivateStateMessage | null>(null);
+  roomView = $state.raw<RoomView | null>(null);
+  privateState = $state.raw<PrivateStateMessage | null>(null);
 
-  private client = $state.raw<ReturnType<typeof createGameClient> | null>(null);
-  private room = $state.raw<GameRoomClient | null>(null);
-  private activeRoomId = $state('');
+  private client: ReturnType<typeof createGameClient> | null = null;
+  private room: GameRoomClient | null = null;
   private isPageUnloading = false;
   private hasInitialized = false;
 
@@ -138,7 +137,7 @@ export class RoomSession {
   }
 
   get roomId() {
-    return this.activeRoomId || this.roomView?.roomId || null;
+    return this.roomView?.roomId ?? null;
   }
 
   init() {
@@ -354,7 +353,6 @@ export class RoomSession {
 
   private bindRoom(nextRoom: GameRoomClient, nextBanner: string) {
     this.room = nextRoom;
-    this.activeRoomId = nextRoom.roomId;
     this.mySessionId = nextRoom.sessionId;
     this.setSnapshot(nextRoom.state);
     this.banner = nextBanner;
@@ -485,7 +483,6 @@ export class RoomSession {
 
   private resetRoomState() {
     this.mySessionId = '';
-    this.activeRoomId = '';
     this.roomView = null;
     this.privateState = null;
   }
