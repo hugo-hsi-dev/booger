@@ -64,83 +64,11 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
     void this.updateRoomAccess();
 
     this.onMessage<LobbyActionMessage>('lobby-action', (client, message) => {
-      if (message.type === 'set-ready') {
-        this.applyAction(client, 'set-ready', () => {
-          this.gameState = setPlayerReady(
-            this.gameState,
-            client.sessionId,
-            Boolean(message.ready)
-          );
-        });
-        return;
-      }
-
-      if (message.type === 'start-game') {
-        if (!this.isHost(client)) {
-          this.sendActionError(client, 'start-game', 'Host only action', ACTION_ERROR_CODES.FORBIDDEN);
-          return;
-        }
-
-        this.applyAction(client, 'start-game', () => {
-          this.gameState = startGame(this.gameState);
-          this.sendPrivateStateToAll();
-        });
-      }
+      this.handleLobbyAction(client, message);
     });
 
     this.onMessage<TableActionMessage>('table-action', (client, message) => {
-      if (message.type === 'sync-private-state') {
-        this.sendPrivateState(client);
-        return;
-      }
-
-      if (message.type === 'set-confidence') {
-        this.applyAction(client, 'set-confidence', () => {
-          this.gameState = setPlayerConfidence(
-            this.gameState,
-            client.sessionId,
-            message.confidenceRank ?? null
-          );
-        });
-        return;
-      }
-
-      if (!this.isHost(client)) {
-        this.sendActionError(client, 'table-action', 'Host only action', ACTION_ERROR_CODES.FORBIDDEN);
-        return;
-      }
-
-      if (message.type === 'advance-street') {
-        this.applyAction(client, 'advance-street', () => {
-          this.gameState = advanceStreet(this.gameState);
-        });
-        return;
-      }
-
-      if (message.type === 'resolve-showdown') {
-        this.applyAction(client, 'resolve-showdown', () => {
-          if (!canResolveShowdown(this.gameState)) {
-            throw new Error('Showdown cannot be resolved yet');
-          }
-
-          this.gameState = resolveShowdown(this.gameState);
-        });
-        return;
-      }
-
-      if (message.type === 'next-hand') {
-        this.applyAction(client, 'next-hand', () => {
-          this.gameState = startNextHand(this.gameState);
-          this.sendPrivateStateToAll();
-        });
-        return;
-      }
-
-      if (message.type === 'restart-run') {
-        this.applyAction(client, 'restart-run', () => {
-          this.gameState = restartCampaign(this.gameState);
-        });
-      }
+      this.handleTableAction(client, message);
     });
   }
 
@@ -178,6 +106,86 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
     return client.sessionId === this.gameState.hostId;
   }
 
+  private handleLobbyAction(client: Client, message: LobbyActionMessage) {
+    if (message.type === 'set-ready') {
+      this.applyAction(client, 'set-ready', () => {
+        this.gameState = setPlayerReady(
+          this.gameState,
+          client.sessionId,
+          Boolean(message.ready)
+        );
+      });
+      return;
+    }
+
+    if (message.type === 'start-game') {
+      if (!this.isHost(client)) {
+        this.sendActionError(client, 'start-game', 'Host only action', ACTION_ERROR_CODES.FORBIDDEN);
+        return;
+      }
+
+      this.applyAction(client, 'start-game', () => {
+        this.gameState = startGame(this.gameState);
+        this.sendPrivateStateToAll();
+      });
+    }
+  }
+
+  private handleTableAction(client: Client, message: TableActionMessage) {
+    if (message.type === 'sync-private-state') {
+      this.sendPrivateState(client);
+      return;
+    }
+
+    if (message.type === 'set-confidence') {
+      this.applyAction(client, 'set-confidence', () => {
+        this.gameState = setPlayerConfidence(
+          this.gameState,
+          client.sessionId,
+          message.confidenceRank ?? null
+        );
+      });
+      return;
+    }
+
+    if (!this.isHost(client)) {
+      this.sendActionError(client, 'table-action', 'Host only action', ACTION_ERROR_CODES.FORBIDDEN);
+      return;
+    }
+
+    if (message.type === 'advance-street') {
+      this.applyAction(client, 'advance-street', () => {
+        this.gameState = advanceStreet(this.gameState);
+      });
+      return;
+    }
+
+    if (message.type === 'resolve-showdown') {
+      this.applyAction(client, 'resolve-showdown', () => {
+        if (!canResolveShowdown(this.gameState)) {
+          throw new Error('Showdown cannot be resolved yet');
+        }
+
+        this.gameState = resolveShowdown(this.gameState);
+      });
+      return;
+    }
+
+    if (message.type === 'next-hand') {
+      this.applyAction(client, 'next-hand', () => {
+        this.gameState = startNextHand(this.gameState);
+        this.sendPrivateStateToAll();
+      });
+      return;
+    }
+
+    if (message.type === 'restart-run') {
+      this.applyAction(client, 'restart-run', () => {
+        this.gameState = restartCampaign(this.gameState);
+      });
+    }
+  }
+
   private applyAction(client: Client, action: string, mutate: () => void) {
     try {
       mutate();
@@ -193,7 +201,12 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
     error: unknown,
     code: number = ACTION_ERROR_CODES.INVALID_ACTION
   ) {
-    const message = error instanceof Error ? error.message : 'Unexpected room error';
+    const message =
+      typeof error === 'string'
+        ? error
+        : error instanceof Error
+          ? error.message
+          : 'Unexpected room error';
     client.error(code, `${action}: ${message}`);
   }
 
