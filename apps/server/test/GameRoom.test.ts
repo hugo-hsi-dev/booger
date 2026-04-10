@@ -26,7 +26,7 @@ type TestClient = Client & {
 type GameRoomAccess = {
   gameState: GameState;
   syncState(): void;
-  handleLobbyAction(client: Client, message: { type: 'set-ready' | 'start-game'; ready?: boolean }): void;
+  handleLobbyAction(client: Client, message: { type: 'set-ready'; ready?: boolean }): void;
   handleTableAction(
     client: Client,
     message:
@@ -131,7 +131,7 @@ test('GameRoom normalizes join names and rejects malformed action payloads', asy
   });
 });
 
-test('GameRoom rejects non-host lobby and table actions with typed errors', async () => {
+test('GameRoom rejects unauthorized table actions with typed errors', async () => {
   const room = new TestGameRoom();
   room.onCreate();
   await flushMicrotasks();
@@ -145,19 +145,47 @@ test('GameRoom rejects non-host lobby and table actions with typed errors', asyn
 
   const access = room as unknown as GameRoomAccess;
 
-  access.handleLobbyAction(guest, { type: 'start-game' });
   access.handleTableAction(guest, { type: 'advance-street' });
 
-  assert.equal(guest.errors.length, 2);
+  assert.equal(guest.errors.length, 1);
   assert.deepEqual(guest.errors[0], {
-    code: 4403,
-    message: 'start-game: Host only action'
-  });
-  assert.deepEqual(guest.errors[1], {
     code: 4403,
     message: 'table-action: Host only action'
   });
   assert.equal(access.gameState.phase, 'lobby');
+});
+
+test('GameRoom automatically starts once every connected player marks ready', async () => {
+  const room = new TestGameRoom();
+  room.onCreate();
+  await flushMicrotasks();
+
+  const host = createClient('host');
+  const guest = createClient('guest');
+
+  room.onJoin(host, { name: 'Host' });
+  room.onJoin(guest, { name: 'Guest' });
+  await flushMicrotasks();
+
+  const access = room as unknown as GameRoomAccess;
+
+  access.handleLobbyAction(host, { type: 'set-ready', ready: true });
+  assert.equal(access.gameState.phase, 'lobby');
+
+  access.handleLobbyAction(guest, { type: 'set-ready', ready: true });
+  await flushMicrotasks();
+
+  assert.equal(access.gameState.phase, 'playing');
+  assert.equal(access.gameState.round, 1);
+  assert.equal(room.lockCalls > 0, true);
+  assert.deepEqual(
+    access.gameState.players.map((player) => player.ready),
+    [false, false]
+  );
+  assert.deepEqual(
+    access.gameState.players.map((player) => player.holeCardCount),
+    [2, 2]
+  );
 });
 
 test('GameRoom sends private state only to the requested client', async () => {

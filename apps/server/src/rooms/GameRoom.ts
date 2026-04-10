@@ -4,6 +4,7 @@ import {
   addPlayer,
   advanceStreet,
   canResolveShowdown,
+  canStartGame,
   createInitialGameState,
   getPlayerHand,
   removePlayer,
@@ -115,17 +116,11 @@ export class GameRoom extends Room<{ state: GameStateSchema }> {
             client.sessionId,
             Boolean(lobbyMessage.ready)
           );
-        });
-        return;
-      case 'start-game':
-        if (!this.isHost(client)) {
-          this.sendActionError(client, 'start-game', 'Host only action', ACTION_ERROR_CODES.FORBIDDEN);
-          return;
-        }
 
-        this.applyAction(client, 'start-game', () => {
-          this.gameState = startGame(this.gameState);
-          this.sendPrivateStateToAll();
+          if (canStartGame(this.gameState)) {
+            this.gameState = startGame(this.gameState);
+            this.sendPrivateStateToAll();
+          }
         });
     }
   }
