@@ -94,6 +94,49 @@ test('resolveShowdown assigns actual ranks and marks a failed read when slots ar
   assert.equal(bob?.handLabel, 'One pair');
 });
 
+test('resolveShowdown keeps tied hands in the same rank group', () => {
+  let state = createInitialGameState('tie-room', 6);
+  state = addPlayer(state, { id: 'alice', name: 'Alice', connected: true });
+  state = addPlayer(state, { id: 'bob', name: 'Bob', connected: true });
+  state = addPlayer(state, { id: 'carol', name: 'Carol', connected: true });
+  state = {
+    ...state,
+    phase: 'playing',
+    street: 'showdown',
+    round: 1,
+    communityCards: ['2H', '2D', '7S', '9C', 'KD'],
+    privateHands: {
+      alice: ['AS', 'AH'],
+      bob: ['AC', 'AD'],
+      carol: ['3C', '4C']
+    },
+    players: state.players.map((player) => ({
+      ...player,
+      holeCardCount: 2,
+      confidenceRank:
+        player.id === 'carol' ? 1 : player.id === 'alice' ? 2 : 3
+    }))
+  };
+
+  assert.equal(canResolveShowdown(state), true);
+
+  const resolved = resolveShowdown(state);
+  const alice = resolved.players.find((player) => player.id === 'alice');
+  const bob = resolved.players.find((player) => player.id === 'bob');
+  const carol = resolved.players.find((player) => player.id === 'carol');
+
+  assert.equal(resolved.phase, 'finished');
+  assert.equal(resolved.outcome, 'success');
+  assert.equal(resolved.successfulHands, 1);
+  assert.equal(resolved.failedHands, 0);
+  assert.equal(alice?.actualRank, 2);
+  assert.equal(bob?.actualRank, 2);
+  assert.equal(carol?.actualRank, 1);
+  assert.equal(alice?.handLabel, 'Two pair');
+  assert.equal(bob?.handLabel, 'Two pair');
+  assert.equal(carol?.handLabel, 'One pair');
+});
+
 test('removePlayer resets an in-progress game to lobby when too few players remain', () => {
   let state = startGame(createLobbyState(), () => 0.4);
   state = removePlayer(state, 'bob');

@@ -394,6 +394,27 @@ function compareHandScores(left: HandScore, right: HandScore) {
   return 0;
 }
 
+function compareShowdownConfidence(left: GamePlayer, right: GamePlayer) {
+  return (left.confidenceRank ?? 0) - (right.confidenceRank ?? 0) || left.seat - right.seat;
+}
+
+function isShowdownConfidenceOrderCorrect(players: GamePlayer[]) {
+  const orderedPlayers = [...players].sort(compareShowdownConfidence);
+
+  return orderedPlayers.every((player, index) => {
+    if (player.confidenceRank === null || player.actualRank === null) {
+      return false;
+    }
+
+    if (index === 0) {
+      return true;
+    }
+
+    const previous = orderedPlayers[index - 1];
+    return (previous?.actualRank ?? 0) <= player.actualRank;
+  });
+}
+
 function evaluateBestHand(cards: CardCode[]) {
   if (cards.length < 5) {
     throw new Error('At least five cards are required to evaluate a hand');
@@ -715,20 +736,32 @@ export function resolveShowdown(state: GameState): GameState {
     return previous ? compareHandScores(entry.score, previous.score) === 0 : false;
   });
 
+  const actualRankByPlayerId = new Map<string, number>();
+  let actualRank = 0;
+
+  ranking.forEach((entry, index) => {
+    const previous = ranking[index - 1];
+
+    if (index === 0 || (previous && compareHandScores(entry.score, previous.score) !== 0)) {
+      actualRank += 1;
+    }
+
+    actualRankByPlayerId.set(entry.playerId, actualRank);
+  });
+
   const players = reindexPlayers(
     state.players.map((player) => {
       const ranked = ranking.find((entry) => entry.playerId === player.id);
-      const actualRank = ranked ? ranking.indexOf(ranked) + 1 : null;
 
       return {
         ...player,
-        actualRank,
+        actualRank: actualRankByPlayerId.get(player.id) ?? null,
         handLabel: ranked?.score.label ?? null
       };
     })
   );
 
-  const outcome = players.every((player) => player.confidenceRank === player.actualRank) ? 'success' : 'failure';
+  const outcome = isShowdownConfidenceOrderCorrect(players) ? 'success' : 'failure';
   const successfulHands = state.successfulHands + (outcome === 'success' ? 1 : 0);
   const failedHands = state.failedHands + (outcome === 'failure' ? 1 : 0);
   const campaignStatus: CampaignStatus =
@@ -737,7 +770,7 @@ export function resolveShowdown(state: GameState): GameState {
       : failedHands >= state.maxFailures
         ? 'lost'
         : 'ongoing';
-  const tieSuffix = hadTie ? ' Ties use seat order in this MVP.' : '';
+  const tieSuffix = hadTie ? ' Ties are grouped together in this MVP.' : '';
 
   return {
     ...state,
