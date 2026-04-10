@@ -1,7 +1,7 @@
 import { browser } from '$app/environment';
 
 import { Client, type Room } from './colyseus-client.js';
-import { GameStateSchema } from '@booger/shared';
+import { GameStateSchema, type LobbyJoinOptions } from '@booger/shared';
 
 export type RoomPhase = 'lobby' | 'playing' | 'finished';
 export type GameOutcome = 'pending' | 'success' | 'failure';
@@ -62,8 +62,8 @@ export function createGameClient(endpoint: string) {
   return new Client(endpoint);
 }
 
-export async function createRoom(client: Client, roomName: string, options: JoinOptions) {
-  const response = await client.http.post<SeatReservation>(`matchmake/create/${roomName}`, {
+export async function createRoom(client: Client, roomName: string, options: LobbyJoinOptions) {
+  const response = await client.http.post<SeatReservationResponse>(`matchmake/create/${roomName}`, {
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json'
@@ -71,11 +71,11 @@ export async function createRoom(client: Client, roomName: string, options: Join
     body: JSON.stringify(options)
   });
 
-  return client.consumeSeatReservation(normalizeSeatReservation(response.data) as any, GameStateSchema);
+  return client.consumeSeatReservation(normalizeSeatReservation(response.data), GameStateSchema);
 }
 
-export async function joinRoom(client: Client, roomId: string, options: JoinOptions) {
-  const response = await client.http.post<SeatReservation>(`matchmake/joinById/${roomId}`, {
+export async function joinRoom(client: Client, roomId: string, options: LobbyJoinOptions) {
+  const response = await client.http.post<SeatReservationResponse>(`matchmake/joinById/${roomId}`, {
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json'
@@ -83,7 +83,7 @@ export async function joinRoom(client: Client, roomId: string, options: JoinOpti
     body: JSON.stringify(options)
   });
 
-  return client.consumeSeatReservation(normalizeSeatReservation(response.data) as any, GameStateSchema);
+  return client.consumeSeatReservation(normalizeSeatReservation(response.data), GameStateSchema);
 }
 
 export async function reconnectRoom(client: Client, reconnectionToken: string) {
@@ -93,7 +93,7 @@ export async function reconnectRoom(client: Client, reconnectionToken: string) {
     throw new Error('Invalid reconnection token');
   }
 
-  const response = await client.http.post<SeatReservation>(`matchmake/reconnect/${roomId}`, {
+  const response = await client.http.post<SeatReservationResponse>(`matchmake/reconnect/${roomId}`, {
     headers: {
       Accept: 'application/json',
       'Content-Type': 'application/json'
@@ -102,7 +102,7 @@ export async function reconnectRoom(client: Client, reconnectionToken: string) {
   });
 
   return client.consumeSeatReservation(
-    normalizeSeatReservation({ ...response.data, reconnectionToken: token }) as any,
+    normalizeSeatReservation({ ...response.data, reconnectionToken: token }),
     GameStateSchema
   );
 }
@@ -167,8 +167,7 @@ export function getServerEndpoint() {
 
 export type GameRoomClient = Room<GameStateSnapshot>;
 
-type JoinOptions = Record<string, unknown>;
-type SeatReservation = {
+type SeatReservationResponse = {
   name: string;
   roomId: string;
   processId: string;
@@ -192,7 +191,7 @@ type SeatReservationEnvelope = {
   devMode?: boolean;
 };
 
-function normalizeSeatReservation(response: SeatReservation): SeatReservationEnvelope {
+function normalizeSeatReservation(response: SeatReservationResponse): SeatReservationEnvelope {
   return {
     room: {
       name: response.name,
