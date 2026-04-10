@@ -247,11 +247,25 @@ function combinationIndices(length: number, size: number) {
   return results;
 }
 
+function normalizeCardCode(card: string): CardCode {
+  const normalized = card.trim().toUpperCase();
+  const match = normalized.match(/^(10|[2-9TJQKA])([SHDC])$/);
+
+  if (!match) {
+    throw new Error(`Invalid card code: ${card}`);
+  }
+
+  const [, rank, suit] = match;
+  return `${rank === '10' ? 'T' : rank}${suit}` as CardCode;
+}
+
 function parseCard(card: CardCode) {
+  const normalized = normalizeCardCode(card);
+
   return {
-    rank: card.slice(0, -1) as CardRank,
-    suit: card.slice(-1) as CardSuit,
-    value: RANK_VALUE[card.slice(0, -1) as CardRank]
+    rank: normalized.slice(0, -1) as CardRank,
+    suit: normalized.slice(-1) as CardSuit,
+    value: RANK_VALUE[normalized.slice(0, -1) as CardRank]
   };
 }
 
@@ -729,7 +743,7 @@ export function resolveShowdown(state: GameState): GameState {
       seat: player.seat,
       score: evaluateBestHand([...getPlayerHand(state, player.id), ...state.communityCards])
     }))
-    .sort((left, right) => compareHandScores(left.score, right.score) || left.seat - right.seat);
+    .sort((left, right) => compareHandScores(right.score, left.score) || left.seat - right.seat);
 
   const hadTie = ranking.some((entry, index) => {
     const previous = ranking[index - 1];

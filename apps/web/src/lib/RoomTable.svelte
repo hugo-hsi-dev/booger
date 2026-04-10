@@ -221,11 +221,11 @@
         <div class="surface-header">
           <div>
             <span class="eyebrow">Confidence order</span>
-            <h3>Rank the table from weakest to strongest</h3>
+            <h3>Rank the table from strongest to weakest</h3>
           </div>
           <div class="street-meta">
-            <span>#1 = weakest read</span>
-            <span>#{totalPlayers} = strongest read</span>
+            <span>#1 = strongest read</span>
+            <span>#{totalPlayers} = weakest read</span>
           </div>
         </div>
 
@@ -261,7 +261,7 @@
               {#if me?.confidenceRank}
                 You currently claim slot <strong>#{me.confidenceRank}</strong>.
               {:else}
-                Claim the slot that matches your confidence in your hand strength.
+                Claim the slot that matches your hand strength estimate, with #1 as strongest.
               {/if}
             </p>
             <button type="button" class="ghost" onclick={clearConfidenceRank} disabled={!me?.confidenceRank}>
