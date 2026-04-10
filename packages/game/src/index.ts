@@ -625,6 +625,29 @@ export function setPlayerReady(state: GameState, playerId: string, ready: boolea
   };
 }
 
+export function setPlayerName(state: GameState, playerId: string, name: string): GameState {
+  if (state.phase !== 'lobby') {
+    throw new Error('Names can only be changed in the lobby');
+  }
+
+  const normalized = name.trim();
+
+  if (!normalized) {
+    throw new Error('Name cannot be empty');
+  }
+
+  const players = reindexPlayers(
+    state.players.map((player) =>
+      player.id === playerId ? { ...player, name: normalized } : player
+    )
+  );
+
+  return {
+    ...state,
+    players
+  };
+}
+
 export function setPlayerConfidence(state: GameState, playerId: string, confidenceRank: number | null): GameState {
   if (state.phase !== 'playing') {
     return state;

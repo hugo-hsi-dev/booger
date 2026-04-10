@@ -26,7 +26,10 @@ type TestClient = Client & {
 type GameRoomAccess = {
   gameState: GameState;
   syncState(): void;
-  handleLobbyAction(client: Client, message: { type: 'set-ready'; ready?: boolean }): void;
+  handleLobbyAction(
+    client: Client,
+    message: { type: 'set-ready'; ready?: boolean } | { type: 'set-name'; name: string }
+  ): void;
   handleTableAction(
     client: Client,
     message:
@@ -129,6 +132,21 @@ test('GameRoom normalizes join names and rejects malformed action payloads', asy
     code: 4400,
     message: 'table-action: Invalid table action payload'
   });
+});
+
+test('GameRoom lets lobby players rename themselves before the game starts', async () => {
+  const room = new TestGameRoom();
+  room.onCreate();
+  await flushMicrotasks();
+
+  const host = createClient('host');
+  room.onJoin(host, { name: 'Host' });
+  await flushMicrotasks();
+
+  const access = room as unknown as GameRoomAccess;
+  access.handleLobbyAction(host, { type: 'set-name', name: '  Renamed Host  ' });
+
+  assert.equal(access.gameState.players[0]?.name, 'Renamed Host');
 });
 
 test('GameRoom rejects unauthorized table actions with typed errors', async () => {
